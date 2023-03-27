@@ -46,10 +46,9 @@ def calculate_thinness(G):
 
 
 G = nx.read_edgelist("graph.txt")
-show_graph(G)
 total_orderings = factorial(G.number_of_nodes())
 print("Number of orderings:", total_orderings)
 print("Processed:")
 
 print(calculate_thinness(G))
-
+show_graph(G)
