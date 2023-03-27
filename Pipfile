@@ -11,3 +11,6 @@ matplotlib = "*"
 
 [requires]
 python_version = "3.10"
+
+[scripts]
+calculate = "python calculate_thinness.py"
