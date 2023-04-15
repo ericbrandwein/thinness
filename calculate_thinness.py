@@ -1,14 +1,9 @@
 import networkx as nx
-import matplotlib.pyplot as plt
-import itertools
 import sys
+from graph_reader import read_graph
 
 GRAPHS_DIR = "adjlists"
 GRAPHS_FILE_EXTENSION = ".adjlist"
-
-def show_graph(G):
-    nx.draw(G, with_labels=True)
-    plt.show()
 
 
 def find_first_adjacent(G, nodes, node):
@@ -110,18 +105,11 @@ def parse_arguments():
         return sys.argv[1]
 
 
-def read_graph(file):
-    filename = f"{GRAPHS_DIR}/{file}{GRAPHS_FILE_EXTENSION}"
-    print("Reading graph from file:", filename)
-    return nx.read_adjlist(filename)
-
-
 def main():
     graph_file = parse_arguments()
     G = read_graph(graph_file)
     
     print("Thinness:", calculate_thinness_backtracking(G))
-    # show_graph(G)
 
 
 if __name__ == "__main__":
