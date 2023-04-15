@@ -77,15 +77,14 @@ def calculate_thinness_starting_with_suborder(G, constraints_graph, ordering, ne
     )
     if thinness >= best_thinness:
         return best_thinness
-    if len(ordering) == G.number_of_nodes():
+    if len(remaining_nodes) == 0:
         return thinness
     next_node = remaining_nodes.pop()
     for new_ordering in insertions(ordering, next_node):
         thinness = calculate_thinness_starting_with_suborder(
             G, constraints_graph, new_ordering, next_node, remaining_nodes, best_thinness
         )
-        if thinness < best_thinness:
-            best_thinness = thinness
+        best_thinness = min(best_thinness, thinness)
     remaining_nodes.add(next_node)
     return best_thinness
 
