@@ -10,6 +10,7 @@ def show_graph(G):
     nx.draw(G, with_labels=True)
     plt.show()
 
+
 def find_first_adjacent(G, nodes, node):
     return next(
         (index for index, adjacent in enumerate(nodes) if G.has_edge(adjacent, node)), 
