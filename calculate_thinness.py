@@ -115,12 +115,14 @@ def read_graph(file):
     print("Reading graph from file:", filename)
     return nx.read_adjlist(filename)
 
+
 def main():
     graph_file = parse_arguments()
     G = read_graph(graph_file)
     
     print("Thinness:", calculate_thinness_backtracking(G))
     # show_graph(G)
+
 
 if __name__ == "__main__":
     main()
