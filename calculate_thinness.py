@@ -1,10 +1,10 @@
 import networkx as nx
 import matplotlib.pyplot as plt
 import itertools
-from math import factorial
+import sys
 
-
-processed_orderings = 0
+GRAPHS_DIR = "adjlists"
+GRAPHS_FILE_EXTENSION = ".adjlist"
 
 def show_graph(G):
     nx.draw(G, with_labels=True)
@@ -30,25 +30,55 @@ def cocomparability_coloring(graph):
 def calculate_thinness_for_ordering(G, ordering):
     constraints_graph = generate_constraints_graph(G, ordering)
     number = cocomparability_coloring(constraints_graph)
-    global processed_orderings, total_orderings
-    processed_orderings += 1
-    if processed_orderings % 10000 == 0:
-        print(f"{processed_orderings}/{total_orderings}, Remaining: {total_orderings - processed_orderings}")
     return number
 
 
-def calculate_thinness(G):
-    nodes = list(G.nodes())
-    return min(
-        calculate_thinness_for_ordering(G, permutation)
-        for permutation in itertools.permutations(nodes)
-    )
+def insertions(iterable, element):
+    for i in range(len(iterable) + 1):
+        yield iterable[:i] + [element] + iterable[i:]
 
 
-G = nx.read_edgelist("graph.txt")
-total_orderings = factorial(G.number_of_nodes())
-print("Number of orderings:", total_orderings)
-print("Processed:")
+def calculate_thinness_starting_with_suborder(G, ordering, remaining_nodes, best_thinness: int):
+    subG = nx.induced_subgraph(G, ordering)
+    thinness = calculate_thinness_for_ordering(subG, ordering)
+    if thinness >= best_thinness:
+        return best_thinness
+    if len(ordering) == G.number_of_nodes():
+        return thinness
+    next_node = remaining_nodes.pop()
+    for new_ordering in insertions(ordering, next_node):
+        thinness = calculate_thinness_starting_with_suborder(G, new_ordering, remaining_nodes, best_thinness)
+        if thinness < best_thinness:
+            best_thinness = thinness
+    remaining_nodes.add(next_node)
+    return best_thinness
 
-print(calculate_thinness(G))
-show_graph(G)
+
+def calculate_thinness_backtracking(G):
+    nodes = set(G.nodes())
+    ordering = [nodes.pop()]
+    return calculate_thinness_starting_with_suborder(G, ordering, nodes, G.number_of_nodes())
+
+
+def parse_arguments():
+    if len(sys.argv) < 2:
+        return "graph"
+    else:
+        return sys.argv[1]
+
+
+def read_graph(file):
+    filename = f"{GRAPHS_DIR}/{file}{GRAPHS_FILE_EXTENSION}"
+    print("Reading graph from file:", filename)
+    return nx.read_adjlist(filename)
+
+def main():
+    graph_file = parse_arguments()
+    G = read_graph(graph_file)
+    
+    print("Thinness:", calculate_thinness_backtracking(G))
+    show_graph(G)
+
+if __name__ == "__main__":
+    main()
+    
