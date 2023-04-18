@@ -70,30 +70,34 @@ def insertions(iterable, element):
         yield iterable[:i] + [element] + iterable[i:]
 
 
-def calculate_thinness_starting_with_suborder(G, constraints_graph, ordering, new_node, remaining_nodes, best_thinness: int):
+def calculate_thinness_starting_with_suborder(G, constraints_graph, ordering, new_node, remaining_nodes, lower_bound: int, upper_bound: int):
     subG = nx.induced_subgraph(G, ordering)
     thinness, constraints_graph = calculate_thinness_for_ordering(
         subG, constraints_graph, ordering, new_node
     )
-    if thinness >= best_thinness:
-        return best_thinness
+    if thinness >= upper_bound:
+        return upper_bound
     if len(remaining_nodes) == 0:
         return thinness
     next_node = remaining_nodes.pop()
     for new_ordering in insertions(ordering, next_node):
         thinness = calculate_thinness_starting_with_suborder(
-            G, constraints_graph, new_ordering, next_node, remaining_nodes, best_thinness
+            G, constraints_graph, new_ordering, next_node, remaining_nodes, lower_bound, upper_bound
         )
-        best_thinness = min(best_thinness, thinness)
+        upper_bound = min(upper_bound, thinness)
+        if upper_bound <= lower_bound:
+            break
     remaining_nodes.add(next_node)
-    return best_thinness
+    return upper_bound
 
 
-def calculate_thinness_backtracking(G):
+def calculate_thinness_backtracking(G, lower_bound=None, upper_bound=None):
     nodes = set(G.nodes())
     ordering = [nodes.pop()]
     return calculate_thinness_starting_with_suborder(
-        G, nx.Graph(), ordering, ordering[0], nodes, G.number_of_nodes()
+        G, nx.Graph(), ordering, ordering[0], nodes, 
+        lower_bound or 1,
+        upper_bound or G.number_of_nodes()
     )
 
 
