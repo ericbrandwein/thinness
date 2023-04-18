@@ -1,13 +1,8 @@
 from graph_reader import read_graph
 from calculate_thinness import calculate_thinness, verify_solution
-from itertools import combinations, chain
 from show_graph import show_graph
 import networkx as nx
-
-
-def all_subsets(iterable):
-    s = list(iterable)
-    return chain.from_iterable(combinations(s, r) for r in range(len(s)+1))
+from utils import all_subsets
 
 
 # Is there a 9-vertex graph with thinness 5?

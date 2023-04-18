@@ -2,7 +2,7 @@ import networkx as nx
 import sys
 from graph_reader import read_graph
 import itertools
-
+from utils import insertions
 
 GRAPHS_DIR = "adjlists"
 GRAPHS_FILE_EXTENSION = ".adjlist"
@@ -89,11 +89,6 @@ def _calculate_thinness_for_ordering(G, constraints_graph, ordering, new_node):
     constraints_graph = _extend_constraints_graph(G, constraints_graph, ordering, new_node)
     coloring = _cocomparability_coloring(constraints_graph)
     return coloring, constraints_graph
-
-
-def insertions(iterable, element):
-    for i in range(len(iterable) + 1):
-        yield iterable[:i] + [element] + iterable[i:]
 
 
 def _calculate_thinness_for_strict_suborder(G, constraints_graph, ordering, remaining_nodes, lower_bound: int, upper_bound: int) -> ConsistentSolution | None:
