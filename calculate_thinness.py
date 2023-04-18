@@ -1,6 +1,8 @@
 import networkx as nx
 import sys
 from graph_reader import read_graph
+import itertools
+
 
 GRAPHS_DIR = "adjlists"
 GRAPHS_FILE_EXTENSION = ".adjlist"
@@ -140,6 +142,14 @@ def calculate_thinness(G, lower_bound=None, upper_bound=None):
     return calculate_thinness_backtracking(G, lower_bound, upper_bound)
 
 
+def verify_solution(G, solution: ConsistentSolution):
+    partition = solution.complete_partition
+    for (u, v, w) in itertools.combinations(solution.ordering, 3):
+        if partition[u] == partition[v] and G.has_edge(u, w) and not G.has_edge(v, w):
+            return False
+    return True
+
+
 def _parse_arguments():
     if len(sys.argv) < 2:
         return "graph"
@@ -152,6 +162,7 @@ def _main():
     G = read_graph(graph_file)
     solution = calculate_thinness_backtracking(G)
     if solution:
+        assert verify_solution(G, solution)
         print(solution)
     else:
         print("No solution found")
