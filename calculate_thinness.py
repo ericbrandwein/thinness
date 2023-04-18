@@ -21,6 +21,14 @@ class ConsistentSolution:
             node: self.partition[node] if node in self.partition else 0 
             for node in self.ordering
         }
+    
+    def __str__(self) -> str:
+        return "\n".join([
+            f"Thinness: {self.number_of_classes}", 
+            f"Ordering: {self.ordering}", 
+            f"Partition: {self.complete_partition}"
+        ])
+
 
 
 def _find_first_adjacent(G, nodes, node):
@@ -144,9 +152,7 @@ def _main():
     G = read_graph(graph_file)
     solution = calculate_thinness_backtracking(G)
     if solution:
-        print("Thinness:", solution.number_of_classes)
-        print("Partition:", solution.complete_partition)
-        print("Ordering:", solution.ordering)
+        print(solution)
     else:
         print("No solution found")
 
