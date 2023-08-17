@@ -1,5 +1,4 @@
 load('helpers.sage')
-load('cocomparability-coloring.sage')
 
 def graphs_by_proper_thinness(n, *, minimal_only=True):
     r""" Calculates the proper thinness of connected non-isomorphic graphs up to `n` vertices.
@@ -83,7 +82,7 @@ def proper_thinness(G, *, lower_bound=1, certificate=True, random_permutations=N
     min_chi, min_pi, min_partition = +Infinity, [], []
     for pi in _iterate_permutations(G.vertices(), random_permutations):
         H = _proper_thinness_create_restrictions_graph(G, pi)
-        partition = cocomparability_coloring(H)
+        partition = H.coloring()
         chi = len(partition)
         if chi < min_chi:
             min_chi, min_pi, min_partition = chi, pi, partition
