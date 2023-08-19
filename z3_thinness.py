@@ -22,7 +22,7 @@ class Variables:
 
 def _add_constraints(solver, graph, variables, lower_bound, upper_bound):
     # Target
-    solver.add(variables.k_thin >= Int(lower_bound), variables.k_thin <= Int(upper_bound))
+    solver.add(variables.k_thin >= lower_bound, variables.k_thin <= upper_bound)
 
     # Classes
     for partition_class in variables.classes.values():
