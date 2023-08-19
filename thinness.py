@@ -136,5 +136,3 @@ def fill_csvs_paralelly(n=10):
                 print_found_graph(graph6, thinness)
             save_last_processed_graph(graph6)
             print_updated_progress(index)
-                
-                
