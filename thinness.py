@@ -10,7 +10,7 @@ from helpers import *
 
 GRAPHS_WITH_N_10 = 11716571
 CHUNK_SIZE = 50
-LAST_PROCESSED_FILENAME = 'data/last-processed.graph6'
+LAST_PROCESSED_INDEX_FILENAME = 'data/last-processed.index'
 
 
 def graphs_by_thinness(n, *, minimal_only=True):
@@ -76,15 +76,15 @@ def save_graph_with_thinness(graph6, thinness):
     write_graph_to_csv(graph6, f'data/thinness-{thinness}.csv')
 
 
-def save_last_processed_graph(graph6):
-    with open(LAST_PROCESSED_FILENAME, mode='w', newline='') as file:
-        file.write(graph6)
+def save_last_processed_index(index):
+    with open(LAST_PROCESSED_INDEX_FILENAME, mode='w', newline='') as file:
+        file.write(str(index))
 
 
-def get_last_processed_graph6():
-    if os.path.exists(LAST_PROCESSED_FILENAME):
-        with open(LAST_PROCESSED_FILENAME, mode='r', newline='') as file:
-            return file.read()
+def get_last_processed_index():
+    if os.path.exists(LAST_PROCESSED_INDEX_FILENAME):
+        with open(LAST_PROCESSED_INDEX_FILENAME, mode='r', newline='') as file:
+            return int(file.read())
     return None
 
 
@@ -106,19 +106,18 @@ def print_found_graph(graph6, thinness):
     print('Found minimal graph:', graph6, 'Thinness:', thinness)
 
 
-def skip_graphs_until(graphs, graph6):
-    for index, graph in enumerate(graphs, start = 1):
-        if graph.graph6_string() == graph6:
-            return index
+def skip_graphs_until(graphs, index):
+    for curr_index, _ in enumerate(graphs, start = 1):
+        if curr_index == index:
+            break
 
 
 def skip_processed_graphs(graphs):
-    last_processed = get_last_processed_graph6()
-    if last_processed:
-        print('Skipping graphs until', last_processed)
-        return skip_graphs_until(graphs, last_processed)
-    else:
-        return 0
+    last_processed = get_last_processed_index()
+    if last_processed> 0:
+        print('Skipping first', last_processed, 'graphs...')
+        skip_graphs_until(graphs, last_processed)
+    return last_processed
 
 
 def fill_csvs_paralelly(n=10):
@@ -134,5 +133,5 @@ def fill_csvs_paralelly(n=10):
             if is_minimal:
                 save_graph_with_thinness(graph6, thinness)
                 print_found_graph(graph6, thinness)
-            save_last_processed_graph(graph6)
+            save_last_processed_index(index)
             print_updated_progress(index)
