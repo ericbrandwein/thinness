@@ -8,7 +8,7 @@ def is_incompatible_triple(graph, u, v, w):
 
 
 def build_compatibility_graph(graph, order):
-    compatibility_graph = Graph(graph.order())
+    compatibility_graph = Graph([graph.vertices(), []])
     for u, v, w in itertools.combinations(order, 3):
         if is_incompatible_triple(graph, u, v, w):
             compatibility_graph.add_edge(u, v, label=w)

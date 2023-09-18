@@ -22,7 +22,8 @@ def get_chordal_minimal_graphs(thinness=3):
 def asteroidize_graph(graph):
     kernel_vertices = list(graph.vertices())
     for i in kernel_vertices:
-        new_vertex = graph.add_vertex()
+        new_vertex = i + "'"
+        graph.add_vertex(new_vertex)
         for j in kernel_vertices:
             if j != i:
                 graph.add_edge(j, new_vertex)
@@ -30,7 +31,9 @@ def asteroidize_graph(graph):
 
 
 def asteroid_graph(kernel_size=5):
-    return asteroidize_graph(graphs.CompleteGraph(kernel_size))
+    graph = graphs.CompleteGraph(kernel_size)
+    graph.relabel({0: 'a', 1: 'b', 2: 'c', 3: 'd', 4: 'e'})
+    return asteroidize_graph(graph)
     
 
 # Every asteroid of every subgraph of K5 has thinness >= 3
@@ -45,6 +48,8 @@ def check_conjecture(kernel_size=5):
 
 
 graph = asteroid_graph()
-order = [5, 0,1,2,3,4, 6,7,8,9]
+# show_graph(graph)
+# Maybe d' is always in the clique in G<?
+order = ["a'", "b'", "c'", "d'", "e'", "c", "a", "b", "d", "e"]
 # _, order, _ = calculate_thinness_with_z3(graph)
 show_compatibility_graph(build_compatibility_graph(graph, order))
