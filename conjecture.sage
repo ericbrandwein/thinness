@@ -17,22 +17,21 @@ def get_chordal_minimal_graphs(thinness=3):
     ]
 
 
-# Conjecture: Asteroid graphs of kernel size k with 1 free vertex in kernel have thinness ceil(k / 2)
-
-def asteroidize_graph(graph):
+# Conjecture: Asteroid graphs of kernel size k have thinness ceil(k / 2)
+def asteroidize_graph(graph, asteroid=Graph(1)):
     kernel_vertices = list(graph.vertices())
     for i in kernel_vertices:
-        new_vertex = i + "'"
-        graph.add_vertex(new_vertex)
+        new_asteroid = asteroid.copy()
+        graph = graph + new_asteroid
+        first_asteroid_vertex = graph.order() - new_asteroid.order()
         for j in kernel_vertices:
             if j != i:
-                graph.add_edge(j, new_vertex)
+                graph.add_edge(j, first_asteroid_vertex)
     return graph
 
 
 def asteroid_graph(kernel_size=5):
     graph = graphs.CompleteGraph(kernel_size)
-    graph.relabel({0: 'a', 1: 'b', 2: 'c', 3: 'd', 4: 'e'})
     return asteroidize_graph(graph)
     
 
@@ -47,9 +46,25 @@ def check_conjecture(kernel_size=5):
     return True
 
 
-graph = asteroid_graph()
-# show_graph(graph)
-# Maybe d' is always in the clique in G<?
-order = ["a'", "b'", "c'", "d'", "e'", "c", "a", "b", "d", "e"]
-# _, order, _ = calculate_thinness_with_z3(graph)
-show_compatibility_graph(build_compatibility_graph(graph, order))
+# Strong conjecture: Having an asteroidal quintuple implies thinness >= 3
+# INVALID
+def counterexample_of_strong_conjecture():
+    graph = graphs.CompleteGraph(5)
+    kernel_vertices = list(graph.vertices())
+    for i in kernel_vertices:
+        new_vertex = graph.add_vertex()
+        graph.add_edge(i, new_vertex)
+    thinness, _, _ = calculate_thinness_with_z3(graph)
+    return graph.graph6_string(), thinness
+
+
+
+# Strongish conjecture: Having a complete kernel of order 5 and adding an asteroid with thinness 2 for each vertex implies thinness >= 4
+# INVALID
+def counterexample_of_strongish_conjecture():
+    asteroid = asteroid_graph(3)
+    graph = graphs.CompleteGraph(5)
+    new_graph = asteroidize_graph(graph, asteroid)
+    thinness, order, partition = calculate_thinness_with_z3(new_graph)
+    print(thinness, order, partition) # 3 [8, 7, 10, 20, 6, 9, 5, 21, 18, 19, 22, 17, 33, 31, 4, 0, 29, 32, 34, 30, 3, 1, 11, 2, 28, 23, 27, 25, 24, 15, 12, 26, 13, 16, 14] {0: 2, 1: 3, 2: 3, 3: 1, 4: 2, 5: 3, 6: 2, 7: 3, 8: 2, 9: 3, 10: 2, 11: 1, 12: 1, 13: 3, 14: 1, 15: 3, 16: 2, 17: 2, 18: 1, 19: 2, 20: 1, 21: 2, 22: 2, 23: 3, 24: 2, 25: 2, 26: 2, 27: 2, 28: 3, 29: 3, 30: 1, 31: 1, 32: 1, 33: 1, 34: 1}
+    return new_graph, thinness
