@@ -1,16 +1,14 @@
-import csv
-import os
 import sys
 from datetime import datetime
 import multiprocessing as mp
 
 from z3_thinness import calculate_thinness_with_z3
 from helpers import *
+from data import load_graphs_from_csv, save_graph_with_thinness, get_last_processed_index, save_last_processed_index
 
 
 GRAPHS_WITH_N_10 = 11716571
 CHUNK_SIZE = 50
-LAST_PROCESSED_INDEX_FILENAME = 'data/last-processed.index'
 
 
 def graphs_by_thinness_precomputed(n):
@@ -34,32 +32,10 @@ def graphs_by_thinness_precomputed(n):
     return output_dict
 
 
-def write_graph_to_csv(graph6, filename):
-    with open(filename, mode='a', newline='') as csvfile:
-        writer = csv.writer(csvfile)
-        writer.writerow([graph6, '', ''])
-
-
-def save_graph_with_thinness(graph6, thinness):
-    write_graph_to_csv(graph6, f'data/thinness-{thinness}.csv')
-
-
-def save_last_processed_index(index):
-    with open(LAST_PROCESSED_INDEX_FILENAME, mode='w', newline='') as file:
-        file.write(str(index))
-
-
-def get_last_processed_index():
-    if os.path.exists(LAST_PROCESSED_INDEX_FILENAME):
-        with open(LAST_PROCESSED_INDEX_FILENAME, mode='r', newline='') as file:
-            return int(file.read())
-    return -1
-
-
 def process_graph(params):
     G, graphs_dict = params
     lower_bound = find_lower_bound(G, graphs_dict)
-    k, _, _ = calculate_thinness_with_z3(G, lower_bound=lower_bound) 
+    k, _, _ = calculate_thinness_with_z3(G, lower_bound=lower_bound)
     is_minimal = k > 1 and not has_induced_subgraph(G, graphs_dict[k])
     return G.graph6_string(), k, is_minimal
 
