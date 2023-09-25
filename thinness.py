@@ -4,32 +4,11 @@ import multiprocessing as mp
 
 from z3_thinness import calculate_thinness_with_z3
 from helpers import *
-from data import load_graphs_from_csv, save_graph_with_thinness, get_last_processed_index, save_last_processed_index
+from data import load_graphs_by_thinness, save_graph_with_thinness, get_last_processed_index, save_last_processed_index
 
 
 GRAPHS_WITH_N_10 = 11716571
 CHUNK_SIZE = 50
-
-
-def graphs_by_thinness_precomputed(n):
-    r""" Outputs the same as `graphs_by_thinness` by using precomputed values.
-
-    TESTS::
-
-        sage: Counter([G.canonical_label() for G in graphs_by_thinness_precomputed(6)[2]]) == Counter([G.canonical_label() for G in graphs_by_thinness(6)[2]])
-        True
-        sage: Counter([G.canonical_label() for G in graphs_by_thinness_precomputed(6)[3]]) == Counter([G.canonical_label() for G in graphs_by_thinness(6)[3]])
-        True
-        sage: len([G for G in graphs_by_thinness_precomputed(6, minimal_only=False)[1] if len(G.vertices()) == 6])
-        56
-    """
-    input_dict = {}
-    for k in range(2, 5):
-        input_dict[k] = load_graphs_from_csv(f'data/thinness-{k}.csv')
-    output_dict = {}
-    for k in range(2, 5):
-        output_dict[k] = [graph for graph in input_dict[k] if graph.order() <= n]
-    return output_dict
 
 
 def process_graph(params):
@@ -77,7 +56,7 @@ def skip_processed_graphs(graphs):
 
 
 def fill_csvs_paralelly(n=10):
-    graphs_dict = graphs_by_thinness_precomputed(n-1)
+    graphs_dict = load_graphs_by_thinness(n-1)
     graphs_dict.setdefault(int(n/2), [])
     graphs = connected_graphs_upto(n, start=n)
     last_skipped_graph = skip_processed_graphs(graphs)

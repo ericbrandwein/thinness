@@ -3,7 +3,22 @@ import os
 from sage.graphs.graph import Graph
 
 
-LAST_PROCESSED_INDEX_FILENAME = 'data/last-processed.index'
+DATA_DIR = 'data'
+LAST_PROCESSED_INDEX_FILENAME = f'{DATA_DIR}/last-processed.index'
+THINNESS = 'thinness'
+PROPER_THINNESS = 'proper-thinness'
+
+
+def save_last_processed_index(index):
+    with open(LAST_PROCESSED_INDEX_FILENAME, mode='w', newline='') as file:
+        file.write(str(index))
+
+
+def get_last_processed_index():
+    if os.path.exists(LAST_PROCESSED_INDEX_FILENAME):
+        with open(LAST_PROCESSED_INDEX_FILENAME, mode='r', newline='') as file:
+            return int(file.read())
+    return -1
 
 
 def load_graphs_from_csv(filename):
@@ -21,21 +36,61 @@ def write_graph_to_csv(graph6, filename):
         writer.writerow([graph6, '', ''])
 
 
+def _width_parameter_graphs_filename(width_parameter, value):
+    return f'{DATA_DIR}/{width_parameter}-{value}.csv'
+
+
+def _save_graph_with_width_parameter(graph6, width_parameter, value):
+    write_graph_to_csv(graph6, _width_parameter_graphs_filename(width_parameter, value))
+
+
 def save_graph_with_thinness(graph6, thinness):
-    write_graph_to_csv(graph6, f'data/thinness-{thinness}.csv')
+    _save_graph_with_width_parameter(graph6, THINNESS, thinness)
 
 
 def save_graph_with_proper_thinness(graph6, proper_thinness):
-    write_graph_to_csv(graph6, f'data/proper-thinness-{proper_thinness}.csv')
+    _save_graph_with_width_parameter(graph6, PROPER_THINNESS, proper_thinness)
 
 
-def save_last_processed_index(index):
-    with open(LAST_PROCESSED_INDEX_FILENAME, mode='w', newline='') as file:
-        file.write(str(index))
+def _load_graphs_with_width(width_parameter, value):
+    return load_graphs_from_csv(_width_parameter_graphs_filename(width_parameter, value))
 
 
-def get_last_processed_index():
-    if os.path.exists(LAST_PROCESSED_INDEX_FILENAME):
-        with open(LAST_PROCESSED_INDEX_FILENAME, mode='r', newline='') as file:
-            return int(file.read())
-    return -1
+def _load_graphs_by_width_parameter(n, width_parameter):
+    input_dict = {}
+    for k in range(2, 5):
+        input_dict[k] = _load_graphs_with_width(width_parameter, k)
+    output_dict = {}
+    for k in range(2, 5):
+        output_dict[k] = [graph for graph in input_dict[k] if graph.order() <= n]
+    return output_dict
+
+
+def load_graphs_by_thinness(n):
+    r""" Outputs the same as `graphs_by_thinness` by using precomputed values.
+
+    TESTS::
+
+        sage: Counter([G.canonical_label() for G in graphs_by_thinness_precomputed(6)[2]]) == Counter([G.canonical_label() for G in graphs_by_thinness(6)[2]])
+        True
+        sage: Counter([G.canonical_label() for G in graphs_by_thinness_precomputed(6)[3]]) == Counter([G.canonical_label() for G in graphs_by_thinness(6)[3]])
+        True
+        sage: len([G for G in graphs_by_thinness_precomputed(6, minimal_only=False)[1] if len(G.vertices()) == 6])
+        56
+    """
+    return _load_graphs_by_width_parameter(n, THINNESS)
+
+
+def load_graphs_by_proper_thinness(n):
+    r""" Outputs the same as `graphs_by_proper_thinness` by using precomputed values.
+
+    TESTS::
+
+        sage: Counter([G.canonical_label() for G in graphs_by_proper_thinness_precomputed(6)[2]]) == Counter([G.canonical_label() for G in graphs_by_proper_thinness(6)[2]])
+        True
+        sage: Counter([G.canonical_label() for G in graphs_by_proper_thinness_precomputed(6)[3]]) == Counter([G.canonical_label() for G in graphs_by_proper_thinness(6)[3]])
+        True
+        sage: len([G for G in graphs_by_proper_thinness_precomputed(6, minimal_only=False)[1] if len(G.vertices()) == 6])
+        26
+    """
+    return _load_graphs_by_width_parameter(n, PROPER_THINNESS)
