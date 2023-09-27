@@ -1,4 +1,5 @@
 import sys
+import itertools
 from datetime import datetime
 import multiprocessing as mp
 
@@ -36,7 +37,7 @@ def print_updated_progress(index, last_skipped_graph, start_time):
 
 def print_found_graph(graph6, thinness):
     sys.stdout.write(u"\u001b[2K")
-    print('Found minimal graph:', graph6, 'Thinness:', thinness)
+    print('Found minimal graph:', graph6, 'Proper thinness:', thinness)
 
 
 def skip_graphs_until(graphs, index):
@@ -54,6 +55,21 @@ def skip_processed_graphs(graphs):
         print(f'Skipping first {last_processed + 1:,} graphs...')
         skip_graphs_until(graphs, last_processed)
     return last_processed
+
+
+def is_consistent_ordered_triple(graph, u, v, w, partition):
+    return not graph.has_edge(u, w) or ((
+        partition[u] != partition[v] or graph.has_edge(v, w)
+    ) and (
+        partition[v] != partition[w] or graph.has_edge(u, v)
+    ))
+
+
+def verify_solution(graph, order, partition):
+    return all(
+        is_consistent_ordered_triple(graph, u, v, w, partition)
+        for u, v, w in itertools.combinations(order, 3)
+    )
 
 
 def fill_csvs_paralelly(n=9):
