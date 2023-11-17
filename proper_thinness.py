@@ -30,9 +30,9 @@ def estimate_time_remaining(start_time, graphs_processed, graphs_remaining):
 def print_updated_progress(index, last_skipped_graph, start_time):
     if index % CHUNK_SIZE == 0:
         graphs_processed = index - last_skipped_graph
-        graphs_remaining = GRAPHS_OF_ORDER_9 - index - 1
+        graphs_remaining = GRAPHS_OF_ORDER_10 - index - 1
         time_remaining = estimate_time_remaining(start_time, graphs_processed, graphs_remaining)
-        print(f'{index + 1:,} total graphs processed, {graphs_remaining:,} remaining. Time remaining: {time_remaining}', end='\r')
+        print(f'{index + 1:,} total graphs processed, {graphs_remaining:,} remaining. Time remaining: {time_remaining}', end='\r', flush=True)
 
 
 def print_found_graph(graph6, thinness):
@@ -89,3 +89,11 @@ def fill_csvs_paralelly(n=9):
                 print_found_graph(graph6, thinness)
             save_last_processed_index(index)
             print_updated_progress(index, last_skipped_graph, start_time)
+
+
+def verify_graphs():
+    graphs = load_graphs_by_proper_thinness(9)
+    for graph in itertools.chain(*graphs.values()):
+        _, order, partition = calculate_proper_thinness_with_z3(graph)
+        assert verify_solution(graph, order, partition), f"Proper thinness for {graph.graph6_string()} was calculated incorrectly!!!!!"
+    print("All graphs verified")

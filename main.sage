@@ -2,4 +2,5 @@
 
 from proper_thinness import fill_csvs_paralelly
 
-fill_csvs_paralelly(n=9)
+fill_csvs_paralelly(10)
+
