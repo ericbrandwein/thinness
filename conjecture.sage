@@ -1,6 +1,6 @@
 #!/usr/bin/env sage
 
-from helpers import load_graphs_from_csv
+from data import load_graphs_from_csv
 from z3_thinness import calculate_thinness_with_z3
 from compatibility import build_compatibility_graph
 from sage.graphs.graph_generators import graphs
