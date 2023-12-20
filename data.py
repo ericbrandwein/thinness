@@ -7,6 +7,8 @@ DATA_DIR = 'data'
 LAST_PROCESSED_INDEX_FILENAME = f'{DATA_DIR}/last-processed.index'
 THINNESS = 'thinness'
 PROPER_THINNESS = 'proper-thinness'
+MAX_THINNESS = 5
+MAX_ORDER = 10
 
 
 def save_last_processed_index(index):
@@ -58,15 +60,15 @@ def _load_graphs_with_width(width_parameter, value):
 
 def _load_graphs_by_width_parameter(n, width_parameter):
     input_dict = {}
-    for k in range(2, 5):
+    for k in range(2, MAX_THINNESS + 1):
         input_dict[k] = _load_graphs_with_width(width_parameter, k)
     output_dict = {}
-    for k in range(2, 5):
+    for k in range(2, MAX_THINNESS + 1):
         output_dict[k] = [graph for graph in input_dict[k] if graph.order() <= n]
     return output_dict
 
 
-def load_graphs_by_thinness(n):
+def load_graphs_by_thinness(n=MAX_ORDER):
     r""" Outputs the same as `graphs_by_thinness` by using precomputed values.
 
     TESTS::
@@ -81,7 +83,7 @@ def load_graphs_by_thinness(n):
     return _load_graphs_by_width_parameter(n, THINNESS)
 
 
-def load_graphs_by_proper_thinness(n):
+def load_graphs_by_proper_thinness(n=MAX_ORDER):
     r""" Outputs the same as `graphs_by_proper_thinness` by using precomputed values.
 
     TESTS::
