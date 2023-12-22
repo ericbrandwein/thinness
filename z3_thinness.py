@@ -5,11 +5,28 @@ from z3 import *
 
 K_THIN_VAR_NAME = 'k_thin'
 
+
+class ConsistentSolution:
+    def __init__(self, order, partition) -> None:
+        self.order = order
+        self.partition = partition
+        self.thinness = len(set(partition.values()))
+
+    @staticmethod
+    def from_model(model, variables):
+        order = sorted(variables.orders, key=lambda node: model[variables.orders[node]].as_long())
+        partition = {
+            node: model[var].as_long()
+            for node, var in variables.classes.items()
+        }
+        return ConsistentSolution(order, partition)
+
+
 class Variables:
-    def __init__(self, graph):
+    def __init__(self, number_of_vertices):
         self.k_thin = Int(K_THIN_VAR_NAME)
-        self.classes = {node: Int(self._class_var_name(node)) for node in graph.vertices()}
-        self.orders = {node: Int(self._order_var_name(node)) for node in graph.vertices()}
+        self.classes = {node: Int(self._class_var_name(node)) for node in range(number_of_vertices)}
+        self.orders = {node: Int(self._order_var_name(node)) for node in range(number_of_vertices)}
 
     @staticmethod
     def _class_var_name(node):
@@ -18,98 +35,82 @@ class Variables:
     @staticmethod
     def _order_var_name(node):
         return f'order_{node}'
-
-
-def _thinness_consistency_constraint(variables, u, v, w):
-    # u, v and w cannot be ordered and u, v in the same class
-    return Or(
-        variables.orders[w] < variables.orders[v],
-        variables.orders[v] < variables.orders[u],
-        variables.classes[u] != variables.classes[v]
-    )
-
-
-def _proper_thinness_consistency_constraint(variables, u, v, w):
-    # It cannot happen that u, v in the same class and (u < v < w or w < v < u)
-    return Or(
-        variables.classes[u] != variables.classes[v],
-        And(
-            variables.orders[v] < variables.orders[u],
-            variables.orders[v] < variables.orders[w]
-        ),
-        And(
-            variables.orders[v] > variables.orders[u],
-            variables.orders[v] > variables.orders[w]
-        )
-    )
-
-
-def _add_bounds_constraint(solver, variables, lower_bound, upper_bound):
-    solver.add(variables.k_thin >= lower_bound, variables.k_thin <= upper_bound)
-
-
-def _add_classes_constraints(solver, variables):
-    for partition_class in variables.classes.values():
-        solver.add(partition_class > 0, partition_class <= variables.k_thin)
-
-
-def _add_order_constraints(solver, variables, graph):
-    for order in variables.orders.values():
-        solver.add(order > 0, order <= len(graph.vertices()))
-    for some_order, other_order in itertools.combinations(variables.orders.values(), 2):
-        solver.add(some_order != other_order)
-
-
-def _add_consistency_constraints(solver, variables, graph, build_consistency_constraint):
-    for u, v, w in itertools.permutations(graph.vertices(), 3):
-        if graph.has_edge(u, w) and not graph.has_edge(v, w):
-            solver.add(build_consistency_constraint(variables, u, v, w))
-
-
-def _get_order(model, variables):
-    return sorted(variables.orders, key=lambda node: model[variables.orders[node]].as_long())
-
-
-def _get_partition(model, variables):
-    return {
-        node: model[var].as_long()
-        for node, var in variables.classes.items()
-    }
-
-
-def _create_solution(model, variables):
-    order = _get_order(model, variables)
-    partition = _get_partition(model, variables)
-    return len(set(partition.values())), order, partition
-
-
-def _calculate_with_z3(graph, consistency_func, lower_bound, upper_bound):
-    opt = Optimize()
     
-    variables = Variables(graph)
-    _add_bounds_constraint(opt, variables, lower_bound, upper_bound)
-    _add_classes_constraints(opt, variables)
-    _add_order_constraints(opt, variables, graph)
-    _add_consistency_constraints(opt, variables, graph, consistency_func)
-    opt.minimize(variables.k_thin)
 
-    if opt.check() == sat:
-        return _create_solution(opt.model(), variables)
+class Z3ParameterSolver:
+    def __init__(self, number_of_vertices):
+        self.solver = Optimize()
+        self.variables = Variables(number_of_vertices)
+        self._add_classes_constraints()
+        self._add_order_constraints()
+        self.solver.minimize(self.variables.k_thin)
+
+    def solve(self, graph, lower_bound=1, upper_bound=None):
+        self.solver.push()
+        self._add_bounds_constraint(lower_bound, upper_bound)
+        self._add_consistency_constraints(graph)
+        
+        solution = None
+        if self.solver.check() == sat:
+            solution = ConsistentSolution.from_model(self.solver.model(), self.variables)
+        self.solver.pop()
+        return solution
+
+    def _add_classes_constraints(self):
+        for partition_class in self.variables.classes.values():
+            self.solver.add(partition_class > 0, partition_class <= self.variables.k_thin)
+
+    def _add_order_constraints(self):
+        for order in self.variables.orders.values():
+            self.solver.add(order > 0, order <= len(self.variables.orders))
+        for some_order, other_order in itertools.combinations(self.variables.orders.values(), 2):
+            self.solver.add(some_order != other_order)
+
+    def _add_bounds_constraint(self, lower_bound, upper_bound):
+        self.solver.add(self.variables.k_thin >= lower_bound, self.variables.k_thin <= upper_bound)
+
+    def _add_consistency_constraints(self, graph):
+        for u, v, w in itertools.permutations(graph.vertices(), 3):
+            if graph.has_edge(u, w) and not graph.has_edge(v, w):
+                self.solver.add(self.build_consistency_constraint(u, v, w))
+    
+    def build_consistency_constraint(self, u, v, w):
+        raise NotImplementedError()
 
 
-def calculate_thinness_with_z3(graph, lower_bound=1, upper_bound=None):
-    return _calculate_with_z3(
-        graph, 
-        _thinness_consistency_constraint, 
-        lower_bound, 
-        upper_bound or graph.order() / 2
-    )
+class Z3ThinnessSolver(Z3ParameterSolver):
+    def __init__(self, number_of_vertices):
+        super().__init__(number_of_vertices)
+
+    def solve(self, graph, lower_bound=1, upper_bound=None):
+        return super().solve(graph, lower_bound, upper_bound or graph.order() / 2)
+
+    def build_consistency_constraint(self, u, v, w):
+        # u, v and w cannot be ordered and u, v in the same class
+        return Or(
+            self.variables.orders[w] < self.variables.orders[v],
+            self.variables.orders[v] < self.variables.orders[u],
+            self.variables.classes[u] != self.variables.classes[v]
+        )
 
 
-def calculate_proper_thinness_with_z3(graph, lower_bound=1, upper_bound=None):
-    return _calculate_with_z3(
-        graph, 
-        _proper_thinness_consistency_constraint, 
-        lower_bound,
-        upper_bound or graph.order() - 1
-    )
+class Z3ProperThinnessSolver(Z3ParameterSolver):
+    def __init__(self, number_of_vertices):
+        super().__init__(number_of_vertices)
+
+    def solve(self, graph, lower_bound=1, upper_bound=None):
+        return super().solve(graph, lower_bound, upper_bound or graph.order() - 1)
+
+    def build_consistency_constraint(self, u, v, w):
+        # It cannot happen that u, v in the same class and (u < v < w or w < v < u)
+        return Or(
+            self.variables.classes[u] != self.variables.classes[v],
+            And(
+                self.variables.orders[v] < self.variables.orders[u],
+                self.variables.orders[v] < self.variables.orders[w]
+            ),
+            And(
+                self.variables.orders[v] > self.variables.orders[u],
+                self.variables.orders[v] > self.variables.orders[w]
+            )
+        ) 

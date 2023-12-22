@@ -2,7 +2,7 @@ import sys
 from datetime import datetime
 import multiprocessing as mp
 
-from z3_thinness import calculate_thinness_with_z3
+from z3_thinness import Z3ThinnessSolver
 from helpers import *
 from data import load_graphs_by_thinness, save_graph_with_thinness, get_last_processed_index, save_last_processed_index
 
@@ -11,12 +11,17 @@ GRAPHS_WITH_N_10 = 11716571
 CHUNK_SIZE = 50
 
 
+def init_process(number_of_vertices):
+    global solver
+    solver = Z3ThinnessSolver(number_of_vertices)
+
+
 def process_graph(params):
     G, graphs_dict = params
     lower_bound = find_lower_bound(G, graphs_dict)
-    k, _, _ = calculate_thinness_with_z3(G, lower_bound=lower_bound)
-    is_minimal = k > 1 and not has_induced_subgraph(G, graphs_dict[k])
-    return G.graph6_string(), k, is_minimal
+    solution = solver.solve(G, lower_bound, lower_bound+1)
+    is_minimal = solution.thinness > 1 and not has_induced_subgraph(G, graphs_dict[solution.thinness])
+    return G.graph6_string(), solution.thinness, is_minimal
 
 
 def estimate_time_remaining(start_time, graphs_processed, graphs_remaining):
@@ -62,7 +67,7 @@ def fill_csvs_paralelly(n=10):
     last_skipped_graph = skip_processed_graphs(graphs)
     
     start_time = datetime.today()
-    with mp.Pool() as pool:
+    with mp.Pool(initializer=init_process, initargs=(n,)) as pool:
         params = ((G, graphs_dict) for G in graphs)
         process_map = pool.imap(process_graph, params, chunksize=CHUNK_SIZE)
         for index, (graph6, thinness, is_minimal) in enumerate(process_map, start=last_skipped_graph + 1):
