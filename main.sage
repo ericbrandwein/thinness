@@ -1,6 +1,9 @@
 #!/usr/bin/env sage
 
-from proper_thinness import fill_csvs_paralelly
+from thinness import fill_csvs_paralelly
+import os
 
-fill_csvs_paralelly(10)
+for n in range(10, 21):
+    fill_csvs_paralelly(n)
+    os.remove('data/last-processed.index')
 

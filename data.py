@@ -5,6 +5,7 @@ from sage.graphs.graph import Graph
 
 DATA_DIR = 'data'
 LAST_PROCESSED_INDEX_FILENAME = f'{DATA_DIR}/last-processed.index'
+ALL_GRAPHS_FILENAME = f'{DATA_DIR}/all-graphs.csv'
 THINNESS = 'thinness'
 PROPER_THINNESS = 'proper-thinness'
 MAX_THINNESS = 5
@@ -47,7 +48,7 @@ def _save_graph_with_width_parameter(graph6, width_parameter, value):
 
 
 def save_graph_with_thinness(graph6, thinness):
-    _save_graph_with_width_parameter(graph6, THINNESS, thinness)
+    _save_graph_with_width_parameter(graph6, THINNESS, thinness) 
 
 
 def save_graph_with_proper_thinness(graph6, proper_thinness):
@@ -96,3 +97,10 @@ def load_graphs_by_proper_thinness(n=MAX_ORDER):
         26
     """
     return _load_graphs_by_width_parameter(n, PROPER_THINNESS)
+
+
+def save_all_graphs(graphs_with_thinness, filename=ALL_GRAPHS_FILENAME):
+    with open(filename, mode='a', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        for graph, n, thinness in graphs_with_thinness:
+            writer.writerow([graph, n, thinness])

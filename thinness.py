@@ -4,9 +4,11 @@ import multiprocessing as mp
 
 from z3_thinness import Z3ThinnessSolver
 from helpers import *
-from data import load_graphs_by_thinness, save_graph_with_thinness, get_last_processed_index, save_last_processed_index
+from data import load_graphs_by_thinness, save_graph_with_thinness, get_last_processed_index, save_last_processed_index, save_all_graphs
+from sage.graphs.trees import TreeIterator
 
-
+TREES_FOR_EACH_ORDER = [1, 1, 1, 1, 2, 3, 6, 11, 23, 47, 106, 235, 551, 1301, 3159, 7741, 19320, 48629, 123867, 317955, 823065, 2144505, 5623756, 14828074, 39299897, 104636890, 279793450, 751065460, 2023443032, 5469566585, 14830871802, 40330829030, 109972410221, 300628862480, 823779631721, 2262366343746, 6226306037178] # https://oeis.org/A000055
+GRAPHS_WITH_N_11 = 1006700565
 GRAPHS_WITH_N_10 = 11716571
 CHUNK_SIZE = 50
 
@@ -17,11 +19,9 @@ def init_process(number_of_vertices):
 
 
 def process_graph(params):
-    G, graphs_dict = params
-    lower_bound = find_lower_bound(G, graphs_dict)
-    solution = solver.solve(G, lower_bound, lower_bound+1)
-    is_minimal = solution.thinness > 1 and not has_induced_subgraph(G, graphs_dict[solution.thinness])
-    return G.graph6_string(), solution.thinness, is_minimal
+    G = params
+    solution = solver.solve(G)
+    return G.graph6_string(), solution.thinness
 
 
 def estimate_time_remaining(start_time, graphs_processed, graphs_remaining):
@@ -30,10 +30,10 @@ def estimate_time_remaining(start_time, graphs_processed, graphs_remaining):
     return time_per_graph * graphs_remaining
 
 
-def print_updated_progress(index, last_skipped_graph, start_time):
+def print_updated_progress(index, last_skipped_graph, start_time, n):
     if index % CHUNK_SIZE == 0:
         graphs_processed = index - last_skipped_graph
-        graphs_remaining = GRAPHS_WITH_N_10 - index - 1
+        graphs_remaining = TREES_FOR_EACH_ORDER[n] - index - 1
         time_remaining = estimate_time_remaining(start_time, graphs_processed, graphs_remaining)
         print(f'{index + 1:,} total graphs processed, {graphs_remaining:,} remaining. Time remaining: {time_remaining}', end='\r')
 
@@ -60,19 +60,19 @@ def skip_processed_graphs(graphs):
     return last_processed
 
 
-def fill_csvs_paralelly(n=10):
-    graphs_dict = load_graphs_by_thinness(n-1)
-    graphs_dict.setdefault(int(n/2), [])
-    graphs = connected_graphs_upto(n, start=n)
+def fill_csvs_paralelly(n=19):
+    graphs = TreeIterator(n)
     last_skipped_graph = skip_processed_graphs(graphs)
-    
-    start_time = datetime.today()
-    with mp.Pool(initializer=init_process, initargs=(n,)) as pool:
-        params = ((G, graphs_dict) for G in graphs)
-        process_map = pool.imap(process_graph, params, chunksize=CHUNK_SIZE)
-        for index, (graph6, thinness, is_minimal) in enumerate(process_map, start=last_skipped_graph + 1):
-            if is_minimal:
-                save_graph_with_thinness(graph6, thinness)
-                print_found_graph(graph6, thinness)
-            save_last_processed_index(index)
-            print_updated_progress(index, last_skipped_graph, start_time)
+    graphs_with_thinness = []
+
+    try:
+        start_time = datetime.today()
+        with mp.Pool(initializer=init_process, initargs=(n,)) as pool:
+            process_map = pool.imap(process_graph, graphs, chunksize=CHUNK_SIZE)
+            for index, (graph6, thinness) in enumerate(process_map, start=last_skipped_graph + 1):
+                graphs_with_thinness.append((graph6, n, thinness))
+                print_updated_progress(index, last_skipped_graph, start_time, n)
+    finally:
+        print("Saving processed trees to data/all-trees.csv...")
+        save_all_graphs(graphs_with_thinness, 'data/all-trees.csv')
+        save_last_processed_index(index)
