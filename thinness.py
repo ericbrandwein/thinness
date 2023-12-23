@@ -18,8 +18,7 @@ def init_process(number_of_vertices):
 
 def process_graph(params):
     G, graphs_dict = params
-    lower_bound = find_lower_bound(G, graphs_dict)
-    solution = solver.solve(G, lower_bound, lower_bound+1)
+    solution = solver.solve(G)
     is_minimal = solution.thinness > 1 and not has_induced_subgraph(G, graphs_dict[solution.thinness])
     return G.graph6_string(), solution.thinness, is_minimal
 
