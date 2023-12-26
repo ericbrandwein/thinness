@@ -6,6 +6,9 @@ from z3 import *
 K_THIN_VAR_NAME = 'k_thin'
 
 
+def hola():
+    pass
+
 class ConsistentSolution:
     def __init__(self, order, partition) -> None:
         self.order = order

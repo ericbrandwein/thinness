@@ -6,6 +6,9 @@ name = "pypi"
 [packages]
 z3-solver = "*"
 snakeviz = "*"
+cython = "*"
+setuptools = "*"
+unknown = {file = "src"}
 
 [dev-packages]
 
@@ -15,3 +18,4 @@ python_version = "3.11"
 [scripts]
 main = "python src/main.py"
 profile-thinness = "bash profile-thinness.sh"
+clean = "bash clean.sh"
