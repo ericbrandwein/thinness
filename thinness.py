@@ -1,6 +1,7 @@
 import sys
 from datetime import datetime
 import multiprocessing as mp
+import itertools
 
 from z3_thinness import Z3ThinnessSolver
 from helpers import *
@@ -42,20 +43,16 @@ def print_found_graph(graph6, thinness):
     print('Found minimal graph:', graph6, 'Thinness:', thinness)
 
 
-def skip_graphs_until(graphs, index):
-    for curr_index, _ in enumerate(graphs):
-        if curr_index % 1000 == 0:
-            print(f'Skipped {curr_index + 1:,}/{index + 1:,} graphs...', end='\r')
-        if curr_index == index:
-            print()
-            break
+def skip_graphs_including(graphs, index):
+    next(itertools.islice(graphs, index + 1, index + 1), None)
 
 
 def skip_processed_graphs(graphs):
     last_processed = get_last_processed_index()
     if last_processed > -1:
-        print(f'Skipping first {last_processed + 1:,} graphs...')
-        skip_graphs_until(graphs, last_processed)
+        print(f'Skipping first {last_processed + 1:,} graphs...', end='', flush=True)
+        skip_graphs_including(graphs, last_processed)
+        print(" Done.")
     return last_processed
 
 

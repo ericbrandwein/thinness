@@ -1,3 +1,5 @@
 __pycache__/
 *.sage.py
 data/images/
+data/last-processed.index
+profile.prof
