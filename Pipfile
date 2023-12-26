@@ -13,5 +13,5 @@ snakeviz = "*"
 python_version = "3.11"
 
 [scripts]
-main = "python main.py"
+main = "python src/main.py"
 profile-thinness = "bash profile-thinness.sh"
