@@ -21,8 +21,8 @@ def profile():
 
     print("Processing graphs...")
     thinness.init_process(n)
-    for graph in take(1000, graphs):
+    for graph in take(100, graphs):
         thinness.process_graph((graph, graphs_dict))
 
 
-cProfile.runctx("profile()", globals(), locals(), "profile.prof")
+cProfile.runctx("profile()", globals(), locals(), "src/profile_thinness.py.prof")

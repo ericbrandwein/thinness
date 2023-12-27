@@ -1,4 +1,4 @@
-from thinness import fill_csvs_paralelly
+from backtracking import solve_graphs
 
-fill_csvs_paralelly(10)
-
+for i in range(1, 20):
+    print(f"Number of graphs with {i} vertices: {len(solve_graphs(i))}")

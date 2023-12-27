@@ -17,5 +17,7 @@ python_version = "3.11"
 
 [scripts]
 main = "python src/main.py"
-profile-thinness = "bash profile-thinness.sh"
+profile-thinness = "bash profile.sh src/profile_thinness.py"
+profile-backtracking = "bash profile.sh src/profile_backtracking.py"
+profile = "bash profile.sh"
 clean = "bash clean.sh"
