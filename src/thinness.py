@@ -2,11 +2,13 @@ import sys
 from datetime import datetime
 import multiprocessing as mp
 import itertools
+from sage.graphs.graph import Graph
 
 from z3_thinness import Z3ThinnessSolver
 from helpers import *
 from data import load_graphs_by_thinness, save_graph_with_thinness, get_last_processed_index, save_last_processed_index
-
+from compatibility import build_compatibility_graph
+from itertools_utils import skip_first
 
 GRAPHS_WITH_N_10 = 11716571
 CHUNK_SIZE = 50
@@ -43,15 +45,11 @@ def print_found_graph(graph6, thinness):
     print('Found minimal graph:', graph6, 'Thinness:', thinness)
 
 
-def skip_graphs_including(graphs, index):
-    next(itertools.islice(graphs, index + 1, index + 1), None)
-
-
 def skip_processed_graphs(graphs):
     last_processed = get_last_processed_index()
     if last_processed > -1:
         print(f'Skipping first {last_processed + 1:,} graphs...', end='', flush=True)
-        skip_graphs_including(graphs, last_processed)
+        skip_first(graphs, last_processed + 1)
         print(" Done.")
     return last_processed
 
@@ -72,3 +70,8 @@ def fill_csvs_paralelly(n=10):
                 print_found_graph(graph6, thinness)
             save_last_processed_index(index)
             print_updated_progress(index, last_skipped_graph, start_time)
+
+
+def minimum_partition_for_vertex_order(graph: Graph, vertex_order: list[int]):
+    compatibility_graph = build_compatibility_graph(graph, vertex_order)
+    return compatibility_graph.coloring()
