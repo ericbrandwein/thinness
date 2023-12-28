@@ -7,19 +7,31 @@ K_THIN_VAR_NAME = 'k_thin'
 
 
 class ConsistentSolution:
-    def __init__(self, order, partition) -> None:
+    def __init__(self, order: list, partition: list[set]) -> None:
         self.order = order
         self.partition = partition
-        self.thinness = len(set(partition.values()))
+        self.thinness = len(partition)
 
     @staticmethod
     def from_model(model, variables):
-        order = sorted(variables.orders, key=lambda node: model[variables.orders[node]].as_long())
-        partition = {
-            node: model[var].as_long()
-            for node, var in variables.classes.items()
-        }
+        order = ConsistentSolution._order_from_model(model, variables) 
+        partition = ConsistentSolution._partition_from_model(model, variables)
         return ConsistentSolution(order, partition)
+
+    @staticmethod
+    def _order_from_model(model, variables):
+        return sorted(variables.orders, key=lambda node: model[variables.orders[node]].as_long())
+
+    @staticmethod
+    def _partition_from_model(model, variables):
+        thinness = model[variables.k_thin].as_long()
+        partition = [set() for _ in range(thinness)]
+        for node, part in variables.classes.items():
+            partition[model[part].as_long() - 1].add(node)
+        return partition
+
+    def __str__(self):
+        return f'Thinness: {self.thinness}, Order: {self.order}, Partition: {self.partition}'
 
 
 class Variables:
@@ -45,10 +57,15 @@ class Z3ParameterSolver:
         self._add_order_constraints()
         self.solver.minimize(self.variables.k_thin)
 
-    def solve(self, graph, lower_bound=1, upper_bound=None):
+    def solve(self, graph, lower_bound=1, upper_bound=None, partial_orders=[], partial_classes=[]):
+        number_of_vertices = len(self.variables.classes)
+        if graph.order() != number_of_vertices:
+            raise ValueError(f'The number of vertices of the graph must match the number of vertices defined when initializing the solver.\nGraph order: {graph.order()}\nSolver order: {number_of_vertices}')
         self.solver.push()
         self._add_bounds_constraint(lower_bound, upper_bound)
         self._add_consistency_constraints(graph)
+        self._add_partial_orders_constraints(partial_orders)
+        self._add_partial_classes_constraints(partial_classes)
         
         solution = None
         if self.solver.check() == sat:
@@ -73,7 +90,17 @@ class Z3ParameterSolver:
         for u, v, w in itertools.permutations(graph.vertices(), 3):
             if graph.has_edge(u, w) and not graph.has_edge(v, w):
                 self.solver.add(self.build_consistency_constraint(u, v, w))
+
+    def _add_partial_orders_constraints(self, partial_orders: list[list]):
+        for partial_order in partial_orders:
+            for u, v in itertools.pairwise(partial_order):
+                self.solver.add(self.variables.orders[u] < self.variables.orders[v])
     
+    def _add_partial_classes_constraints(self, partial_classes: list[set]):
+        for partial_class in partial_classes:
+            for u, v in itertools.pairwise(partial_class):
+                self.solver.add(self.variables.classes[u] == self.variables.classes[v])
+
     def build_consistency_constraint(self, u, v, w):
         raise NotImplementedError()
 
@@ -82,8 +109,8 @@ class Z3ThinnessSolver(Z3ParameterSolver):
     def __init__(self, number_of_vertices):
         super().__init__(number_of_vertices)
 
-    def solve(self, graph, lower_bound=1, upper_bound=None):
-        return super().solve(graph, lower_bound, upper_bound or graph.order() / 2)
+    def solve(self, graph, lower_bound=1, upper_bound=None, partial_orders=[], partial_classes=[]):
+        return super().solve(graph, lower_bound, upper_bound or graph.order() / 2, partial_orders, partial_classes)
 
     def build_consistency_constraint(self, u, v, w):
         # u, v and w cannot be ordered and u, v in the same class
@@ -98,8 +125,8 @@ class Z3ProperThinnessSolver(Z3ParameterSolver):
     def __init__(self, number_of_vertices):
         super().__init__(number_of_vertices)
 
-    def solve(self, graph, lower_bound=1, upper_bound=None):
-        return super().solve(graph, lower_bound, upper_bound or graph.order() - 1)
+    def solve(self, graph, lower_bound=1, upper_bound=None, partial_orders=[], partial_classes=[]):
+        return super().solve(graph, lower_bound, upper_bound or graph.order() - 1, partial_orders, partial_classes)
 
     def build_consistency_constraint(self, u, v, w):
         # It cannot happen that u, v in the same class and (u < v < w or w < v < u)
