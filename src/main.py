@@ -70,7 +70,7 @@ def create_Kn_by_Knc(n: int):
 # Order: [19, 20, 21, 17, 22, 23, 24, 16, 0, 25, 26, 27, 9, 10, 12, 14, 28, 15, 8, 5, 13, 29, 2, 11, 4, 7, 30, 3, 6, 1, 31, 32, 33, 34, 35, 36, 18, 37]
 # Partition: {0: 1, 1: 6, 2: 1, 3: 3, 4: 5, 5: 7, 6: 3, 7: 5, 8: 3, 9: 3, 10: 6, 11: 8, 12: 5, 13: 2, 14: 9, 15: 10, 16: 7, 17: 1, 18: 4, 19: 9, 20: 10, 21: 7, 22: 6, 23: 2, 24: 4, 25: 3, 26: 8, 27: 5, 28: 8, 29: 8, 30: 4, 31: 4, 32: 4, 33: 4, 34: 4, 35: 4, 36: 4, 37: 3}
 def check_thinness_of_Kn_by_Knc():
-    for i in range(2, 20, 2):
+    for i in range(2, 20):
         solver = Z3ThinnessSolver(2*i)
         # add_left_order_constraints(solver, i)
         # add_2_per_side_in_each_class_constraints(solver, i)
@@ -180,25 +180,41 @@ def try_heuristic_orders_for_Kn_by_Knc():
         assert expected_thinness == len(partition), f"Expected thinness: {expected_thinness}, actual: {len(partition)}, partition: {partition}, order: {order}"
 
 
+# Doesn't work
+def heuristic_order_for_Kn_by_Knc5(vertices_per_side: int):
+    order = []
+    for i in range(0, vertices_per_side, 2):
+        order += [i + vertices_per_side + 1, i, i + 1, i + vertices_per_side]
+    return order
+
+
 def partition_for_heuristic_4(vertices_per_side: int):
-    parts = floor(vertices_per_side / 2)
+    parts = ceil(vertices_per_side / 2)
     partition = [set() for _ in range(parts)]
-    for part, vertex in enumerate(range(vertices_per_side+1, 2*vertices_per_side, 2)):
+    parts_per_vertices = itertools.chain(
+        enumerate(range(vertices_per_side+1, 2*vertices_per_side, 2)),
+        enumerate(range(0, vertices_per_side, 2)),
+        enumerate(range(1, vertices_per_side, 2)),
+        enumerate(range(vertices_per_side, 2*vertices_per_side - 2, 2), start=1),
+    )
+
+    for part, vertex in parts_per_vertices:
         partition[part].add(vertex)
-    for part, vertex in enumerate(range(0, vertices_per_side, 2)):
-        partition[part].add(vertex)
-        partition[part].add(vertex+1)
-    partition[0].add(vertices_per_side*2-2)
-    for part, vertex in enumerate(range(vertices_per_side, 2*vertices_per_side - 2, 2), start=1):
-        partition[part].add(vertex)
+
+    if vertices_per_side % 2 == 0:
+        partition[0].add(vertices_per_side*2-2)
     return partition
 
 
+# Works!
 def heuristic_order_for_Kn_by_Knc4(vertices_per_side: int):
     order = []
-    order.extend(range(vertices_per_side*2-1, vertices_per_side-1, -2))
+    order.extend(range(vertices_per_side + 1, vertices_per_side*2, 2))
     for i in range(0, vertices_per_side, 2):
-        order += [i, i+1, i+vertices_per_side]
+        order.append(i)
+        if i+1 < vertices_per_side:
+            order.append(i+1)
+        order.append(i+vertices_per_side)
     return order
 
 
