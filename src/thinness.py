@@ -1,7 +1,6 @@
 import sys
 from datetime import datetime
 import multiprocessing as mp
-import itertools
 from sage.graphs.graph import Graph
 
 from z3_thinness import Z3ThinnessSolver
@@ -75,3 +74,4 @@ def fill_csvs_paralelly(n=10):
 def minimum_partition_for_vertex_order(graph: Graph, vertex_order: list[int]):
     compatibility_graph = build_compatibility_graph(graph, vertex_order)
     return compatibility_graph.coloring()
+

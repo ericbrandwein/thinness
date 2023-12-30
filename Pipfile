@@ -16,6 +16,7 @@ unknown = {file = "src"}
 python_version = "3.11"
 
 [scripts]
+test = "python -m unittest discover"
 main = "python src/main.py"
 profile-thinness = "bash profile.sh src/profile_thinness.py"
 profile-backtracking = "bash profile.sh src/profile_backtracking.py"

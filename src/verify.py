@@ -3,14 +3,7 @@ import multiprocessing as mp
 
 from helpers import load_graphs_from_csv, has_induced_subgraph
 from z3_thinness import calculate_thinness_with_z3
-from thinness import graphs_by_thinness_precomputed
-
-
-def verify_solution(G, partition, order):
-    for u, v, w in itertools.combinations(order, 3):
-        if partition[u] == partition[v] and G.has_edge(u, w) and not G.has_edge(v, w):
-            return False
-    return True
+from thinness import graphs_by_thinness_precomputed, verify_solution
 
 
 def verify_csv_solutions(thinness):
