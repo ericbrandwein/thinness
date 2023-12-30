@@ -39,7 +39,7 @@ class Z3ParameterSolver:
         
         solution = None
         if self.solver.check() == sat:
-            solution = ConsistentSolution.from_model(self.solver.model(), self.variables)
+            solution = self._build_solution()
         self.solver.pop()
         return solution
 
@@ -70,6 +70,20 @@ class Z3ParameterSolver:
         for partial_class in partial_classes:
             for u, v in itertools.pairwise(partial_class):
                 self.solver.add(self.variables.classes[u] == self.variables.classes[v])
+
+    def _build_solution(self) -> ConsistentSolution:
+        return ConsistentSolution(self._build_order(), self._build_partition())
+
+    def _build_order(self):
+        return sorted(self.variables.orders, key=lambda node: self.solver.model()[self.variables.orders[node]].as_long())
+
+    def _build_partition(self):
+        model = self.solver.model()
+        thinness = model[self.variables.k_thin].as_long()
+        partition = [set() for _ in range(thinness)]
+        for node, part in self.variables.classes.items():
+            partition[model[part].as_long() - 1].add(node)
+        return partition
 
     def build_consistency_constraint(self, u, v, w):
         raise NotImplementedError()
