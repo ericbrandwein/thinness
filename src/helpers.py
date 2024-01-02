@@ -17,11 +17,8 @@ def iterate_permutations(vertex_set, random_permutations=None):
             yield pi
 
 def has_induced_subgraph(G, graphs_list):
-    for H in graphs_list:
-        if G.subgraph_search(H, induced=True):
-            return True
-    return False
-
+    return any(G.subgraph_search(H, induced=True) for H in graphs_list)
+    
 def find_lower_bound(G, graphs_dict):
     for k in sorted(graphs_dict, reverse=True):
         if has_induced_subgraph(G, graphs_dict[k]):

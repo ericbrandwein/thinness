@@ -11,4 +11,4 @@ class ConsistentSolution:
         return None
 
     def __str__(self):
-        return f'Thinness: {self.thinness}, Order: {self.order}, Partition: {self.partition}'
+        return '{' + f'Thinness: {self.thinness}, Order: {self.order}, Partition: {self.partition}' + '}'
