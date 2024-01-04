@@ -15,7 +15,7 @@ class TestVertexSeparation(unittest.TestCase):
         linear_layout = [0]
         vertex_separation = 0
 
-        solution = solution_from_vertex_separation(graph, linear_layout, vertex_separation)
+        solution = solution_from_vertex_separation(graph, linear_layout)
 
         self.assertEqual(solution.thinness, 1)
         self.assertTrue(verify_solution(graph, solution))
@@ -26,7 +26,7 @@ class TestVertexSeparation(unittest.TestCase):
         linear_layout = [0, 1]
         vertex_separation = 1
 
-        solution = solution_from_vertex_separation(graph, linear_layout, vertex_separation)
+        solution = solution_from_vertex_separation(graph, linear_layout)
 
         self.assertEqual(solution.thinness, vertex_separation)
         self.assertTrue(verify_solution(graph, solution))
@@ -37,7 +37,7 @@ class TestVertexSeparation(unittest.TestCase):
         linear_layout = [0, 1, 2]
         vertex_separation = 2
 
-        solution = solution_from_vertex_separation(graph, linear_layout, vertex_separation)
+        solution = solution_from_vertex_separation(graph, linear_layout)
 
         self.assertEqual(solution.thinness, vertex_separation)
         self.assertTrue(verify_solution(graph, solution))
@@ -48,22 +48,21 @@ class TestVertexSeparation(unittest.TestCase):
             1: [],
             2: [],
         })
-        linear_layout = [0, 1, 2]
+        linear_layout = [2, 1, 0]
         vertex_separation = 1
 
-        solution = solution_from_vertex_separation(graph, linear_layout, vertex_separation)
+        solution = solution_from_vertex_separation(graph, linear_layout)
 
         self.assertEqual(solution.thinness, vertex_separation)
         self.assertTrue(verify_solution(graph, solution))
 
-    @unittest.skip("vertex_separation() is broken, doesn't matter which algorithm you use.")
     def test_many_graphs(self):
         set_random_seed(0)
         for _ in range(100):
             graph = graphs.RandomGNP(5, 0.5)
             cost, layout = vertex_separation(graph)
             with self.subTest(graph=graph.graph6_string()):
-                solution = solution_from_vertex_separation(graph, layout, cost)
+                solution = solution_from_vertex_separation(graph, layout)
                 thinness = max(1, cost)
                 self.assertEqual(solution.thinness, thinness, f"Solution: {solution}, linear layout: {layout}, cost: {cost}")
                 self.assertTrue(verify_solution(graph, solution))

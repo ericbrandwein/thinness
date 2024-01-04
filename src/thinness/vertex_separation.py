@@ -5,8 +5,9 @@ from sage.graphs.graph import Graph
 from .consistent_solution import ConsistentSolution
 
 
-def solution_from_vertex_separation(graph: Graph, linear_layout: list[int], vertex_separation: int) -> ConsistentSolution:
+def solution_from_vertex_separation(graph: Graph, linear_layout: list[int]) -> ConsistentSolution:
     """The vertices in `graph` must be numbers from 0 to `graph.order() - 1`."""
+    linear_layout = list(reversed(linear_layout))
     last_neighbors = _get_last_neighbors(graph, linear_layout)
     order = deque()
     part_of = [None] * graph.order()
@@ -32,11 +33,8 @@ def solution_from_vertex_separation(graph: Graph, linear_layout: list[int], vert
                 _insert_before(order, vertex, last_neighbor)
                 part_of[vertex] = part_of[last_neighbor]
 
-    partition = [set() for _ in set(part_of)]
-    for vertex, part in enumerate(part_of):
-        partition[part].add(vertex)
-
-    return ConsistentSolution(order, partition)
+    partition = _build_partition(part_of)
+    return ConsistentSolution(list(order), partition)
 
 
 def _get_last_neighbors(graph: Graph, linear_layout: list[int]) -> list[int]:
@@ -44,7 +42,7 @@ def _get_last_neighbors(graph: Graph, linear_layout: list[int]) -> list[int]:
     last_neighbors = [0] * graph.order()
     for index, vertex in enumerate(linear_layout):
         for neighbor in graph.neighbors(vertex):
-            last_neighbors[neighbor] = max(index, last_neighbors[neighbor])
+            last_neighbors[neighbor] = max(last_neighbors[neighbor], index)
 
     return last_neighbors
 
@@ -62,3 +60,11 @@ def _mex(iterable) -> int:
 def _insert_before(deck: deque, element, before):
     position_of_last_neighbor_in_order = deck.index(before)
     deck.insert(position_of_last_neighbor_in_order, element)
+
+
+def _build_partition(part_of: list[int]) -> list[set[int]]:
+    partition = [set() for _ in set(part_of)]
+    for vertex, part in enumerate(part_of):
+        partition[part].add(vertex)
+
+    return partition
