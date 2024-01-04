@@ -1,8 +1,8 @@
 import unittest
 from math import ceil
 from sage.graphs.graph import Graph
-from src.thinness import ConsistentSolution, verify_solution
-from src.thinness.split_crown import *
+from thinness import ConsistentSolution, verify_solution
+from thinness.split_crown import *
 
 
 class TestBuildSplitCrownGraph(unittest.TestCase):

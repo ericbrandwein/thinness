@@ -1,6 +1,6 @@
 import itertools
 from z3 import *
-from thinness import ConsistentSolution
+from .consistent_solution import ConsistentSolution
 
 K_THIN_VAR_NAME = 'k_thin'
 

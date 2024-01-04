@@ -1,1 +1,1 @@
-rm -rf build dist *.egg-info src/build src/*.egg-info src/*.c src/*.so profile.prof src/*.prof
+rm -rf build dist *.egg-info *.egg-info **/*.c **/*.so *.prof

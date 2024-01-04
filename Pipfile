@@ -5,20 +5,18 @@ name = "pypi"
 
 [packages]
 z3-solver = "*"
-snakeviz = "*"
 cython = "*"
 setuptools = "*"
-unknown = {file = "src"}
 
 [dev-packages]
+snakeviz = "*"
 
 [requires]
 python_version = "3.11"
 
 [scripts]
 test = "python -m unittest discover"
-main = "python src/main.py"
-profile-thinness = "bash profile.sh src/profile_thinness.py"
-profile-backtracking = "bash profile.sh src/profile_backtracking.py"
+profile-thinness = "bash profile.sh thinness.profile_thinness"
+profile-backtracking = "bash profile.sh thinness.profile_backtracking"
 profile = "bash profile.sh"
 clean = "bash clean.sh"

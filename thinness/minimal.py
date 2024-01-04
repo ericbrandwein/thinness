@@ -3,11 +3,14 @@ from datetime import datetime
 import multiprocessing as mp
 from sage.graphs.graph import Graph
 
-from z3_thinness import Z3ThinnessSolver
-from helpers import *
-from data import load_graphs_by_thinness, save_graph_with_thinness, get_last_processed_index, save_last_processed_index
-from compatibility import build_compatibility_graph
-from itertools_utils import skip_first
+from .helpers import *
+from .data import load_graphs_by_thinness, save_graph_with_thinness, get_last_processed_index, save_last_processed_index
+from .compatibility import build_compatibility_graph
+from .itertools_utils import skip_first
+
+import pyximport; pyximport.install()
+from .z3 import Z3ThinnessSolver
+
 
 GRAPHS_WITH_N_10 = 11716571
 CHUNK_SIZE = 50

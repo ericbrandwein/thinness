@@ -13,7 +13,6 @@ class TestVertexSeparation(unittest.TestCase):
     def test_trivial_graph(self):
         graph = Graph(1)
         linear_layout = [0]
-        vertex_separation = 0
 
         solution = solution_from_vertex_separation(graph, linear_layout)
 

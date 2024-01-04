@@ -1,8 +1,5 @@
-import cProfile
 import itertools
-import thinness
-import data
-import helpers
+from . import minimal, data, helpers, itertools_utils
 
 
 def take(n, iterable):
@@ -17,12 +14,12 @@ def profile():
     graphs = helpers.connected_graphs_upto(n, start=n)
 
     print("Skipping graphs...")
-    thinness.skip_graphs_including(graphs, 1000)
+    itertools_utils.skip_first(graphs, 1000)
 
     print("Processing graphs...")
-    thinness.init_process(n)
+    minimal.init_process(n)
     for graph in take(100, graphs):
-        thinness.process_graph((graph, graphs_dict))
+        minimal.process_graph((graph, graphs_dict))
 
 
-cProfile.runctx("profile()", globals(), locals(), "src/profile_thinness.py.prof")
+profile()

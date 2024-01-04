@@ -1,8 +1,9 @@
 import unittest
 from sage.graphs.graph_generators import graphs
-from thinness import verify_solution
 
-from z3_thinness import Z3ThinnessSolver
+import pyximport; pyximport.install()
+from thinness import verify_solution
+from thinness.z3 import Z3ThinnessSolver
 
 
 class TestZ3Thinness(unittest.TestCase):

@@ -5,7 +5,7 @@ Calculate the thinness and proper thinness of graphs with `n` vertices using Sag
 ## Running locally
 - Install SageMath
 - Install pipenv
-- Run `pipenv --site-packages install`
+- Run `pipenv --site-packages --dev install`
 - Run `pipenv run main` for an example run
 
 ## Classification of small graphs
