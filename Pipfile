@@ -16,7 +16,8 @@ python_version = "3.11"
 
 [scripts]
 test = "python -m unittest discover"
-profile-thinness = "bash profile.sh thinness.profile_thinness"
-profile-backtracking = "bash profile.sh thinness.profile_backtracking"
+profile-thinness = "bash profile.sh profile/profile_thinness.py"
+profile-backtracking = "bash profile.sh profile/profile_backtracking.py"
+profile-bab = "bash profile.sh profile/profile_branch_and_bound.py"
 profile = "bash profile.sh"
 clean = "bash clean.sh"

@@ -1,5 +1,5 @@
 import itertools
-from . import minimal, data, helpers, itertools_utils
+from thinness import minimal, data, helpers, itertools_utils
 
 
 def take(n, iterable):
