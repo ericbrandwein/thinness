@@ -12,10 +12,8 @@ from thinness.z3 import Z3ThinnessSolver
 
 class TestBranchAndBound(unittest.TestCase):
     def _assert_thinness_of_graph(self, graph: Graph, expected_thinness: int):
-        actual_thinness, order = calculate_thinness_with_branch_and_bound(graph)
+        actual_thinness = calculate_thinness_with_branch_and_bound(graph)
         self.assertEqual(actual_thinness, expected_thinness)
-        solution = Z3ThinnessSolver(graph.order()).solve(graph, partial_orders=[order])
-        self.assertIsNotNone(solution)
 
     def test_thinness_of_K1(self):
         self._assert_thinness_of_graph(Graph(1), 1)
