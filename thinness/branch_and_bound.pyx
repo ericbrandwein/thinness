@@ -12,7 +12,7 @@ def calculate_thinness_with_branch_and_bound(graph: Graph, lower_bound: int = 1,
     components = [graph.subgraph(component) for component in graph.connected_components()]
     for component in components:
         component.relabel()
-    return max(calculate_thinness_of_connected_graph(component, lower_bound, upper_bound) for  component in components)
+    return max(calculate_thinness_of_connected_graph(component, lower_bound, upper_bound) for component in components)
 
 
 def calculate_thinness_of_connected_graph(graph: Graph, lower_bound: int = 1, upper_bound: int = None) -> int:
