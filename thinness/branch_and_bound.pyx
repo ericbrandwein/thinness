@@ -6,7 +6,7 @@ from sage.data_structures.bitset import Bitset
 
 from .vertex_separation import solution_from_vertex_separation
 from .consistent_solution import ConsistentSolution
-
+from .reduce import reduce_graph
 
 def calculate_thinness_with_branch_and_bound(graph: Graph, lower_bound: int = 1, upper_bound: int = None) -> int:
     components = [graph.subgraph(component) for component in graph.connected_components()]
@@ -16,6 +16,7 @@ def calculate_thinness_with_branch_and_bound(graph: Graph, lower_bound: int = 1,
 
 
 def calculate_thinness_of_connected_graph(graph: Graph, lower_bound: int = 1, upper_bound: int = None) -> int:
+    graph = reduce_graph(graph)
     upper_bound = upper_bound or graph.order() - 1
     _, linear_layout = vertex_separation(graph)
     initial_solution = solution_from_vertex_separation(graph, linear_layout)
