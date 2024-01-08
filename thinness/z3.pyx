@@ -94,7 +94,7 @@ class Z3ThinnessSolver(Z3ParameterSolver):
         super().__init__(number_of_vertices)
 
     def solve(self, graph, lower_bound=1, upper_bound=None, partial_orders=[], partial_classes=[]):
-        return super().solve(graph, lower_bound, upper_bound or graph.order() / 2, partial_orders, partial_classes)
+        return super().solve(graph, lower_bound, max(1, upper_bound or graph.order() - 1), partial_orders, partial_classes)
 
     def build_consistency_constraint(self, u, v, w):
         # u, v and w cannot be ordered and u, v in the same class
