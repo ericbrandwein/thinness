@@ -4,8 +4,8 @@ from sage.graphs.graph import Graph
 from sage.graphs.graph_generators import graphs
 from sage.misc.randstate import set_random_seed
 
-from thinness.order import thinness_of_order
 import pyximport; pyximport.install()
+from thinness.order import thinness_of_order
 from thinness.z3 import Z3ThinnessSolver
 
 
