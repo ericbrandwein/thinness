@@ -2,7 +2,6 @@
 cimport cython
 from sage.graphs.graph import Graph
 from sage.graphs.graph_decompositions.vertex_separation import vertex_separation
-from sage.matrix.matrix_integer_dense import Matrix_integer_dense
 from sage.data_structures.bitset import Bitset
 
 from .vertex_separation import solution_from_vertex_separation
@@ -10,6 +9,13 @@ from .consistent_solution import ConsistentSolution
 
 
 def calculate_thinness_with_branch_and_bound(graph: Graph, lower_bound: int = 1, upper_bound: int = None) -> int:
+    components = [graph.subgraph(component) for component in graph.connected_components()]
+    for component in components:
+        component.relabel()
+    return max(calculate_thinness_of_connected_graph(component, lower_bound, upper_bound) for  component in components)
+
+
+def calculate_thinness_of_connected_graph(graph: Graph, lower_bound: int = 1, upper_bound: int = None) -> int:
     upper_bound = upper_bound or graph.order() - 1
     _, linear_layout = vertex_separation(graph)
     initial_solution = solution_from_vertex_separation(graph, linear_layout)
