@@ -1,5 +1,3 @@
-# cython: profile=True
-cimport cython
 from sage.graphs.graph import Graph
 from sage.data_structures.bitset import Bitset
 
@@ -43,22 +41,22 @@ def _get_best_upper_bound(graph: Graph) -> int:
     )
 
 
-cdef _branch_and_bound(graph: list[Bitset], order: list[int], part_of: list[int], classes_used: int, lower_bound: int, upper_bound: int):
-    if set(order) == set(range(len(graph))) and classes_used <= upper_bound:
-        return classes_used
+cdef _branch_and_bound(graph: list[Bitset], order: list[int], part_of: list[int], parts_used: int, lower_bound: int, upper_bound: int):
+    if set(order) == set(range(len(graph))) and parts_used <= upper_bound:
+        return parts_used
     
     suffix_vertices = Bitset(range(len(graph)))
     if order:
         suffix_vertices -= Bitset(order)
     best_solution_found = None
     for vertex in suffix_vertices:
-        parts_for_vertex = _get_available_parts_for_vertex(graph, vertex, order, part_of, classes_used, suffix_vertices)
+        parts_for_vertex = _get_available_parts_for_vertex(graph, vertex, order, part_of, parts_used, suffix_vertices)
         order.append(vertex)
         for part in parts_for_vertex:
             if part < upper_bound:
-                current_classes_used = max(classes_used, part + 1)
+                current_parts_used = max(parts_used, part + 1)
                 part_of[vertex] = part
-                current_solution = _branch_and_bound(graph, order, part_of, current_classes_used, max(lower_bound, current_classes_used), upper_bound)
+                current_solution = _branch_and_bound(graph, order, part_of, current_parts_used, max(lower_bound, current_parts_used), upper_bound)
                 if current_solution is not None:
                     best_solution_found = current_solution
                     upper_bound = best_solution_found - 1
@@ -69,13 +67,14 @@ cdef _branch_and_bound(graph: list[Bitset], order: list[int], part_of: list[int]
     return best_solution_found
 
 
-cdef inline object _get_available_parts_for_vertex(graph: list[Bitset], vertex: int, order: list[int], part_of: list[int], classes_used: int, suffix_vertices: Bitset):
-    parts_for_vertex = Bitset(range(classes_used + 1))
-    suffix_non_neighbors_of_vertex = graph[vertex].complement().intersection(suffix_vertices)
-    if vertex in suffix_non_neighbors_of_vertex:
-        suffix_non_neighbors_of_vertex.remove(vertex)
+cdef inline object _get_available_parts_for_vertex(graph: list[Bitset], vertex: int, order: list[int], part_of: list[int], parts_used: int, suffix_vertices: Bitset):
+    parts_for_vertex = Bitset(range(parts_used + 1))
+
+    suffix_non_neighbors_of_vertex = graph[vertex].complement()
+    suffix_non_neighbors_of_vertex.intersection_update(suffix_vertices)
+    suffix_non_neighbors_of_vertex.discard(vertex)
     
     for order_vertex in order:
-        if part_of[order_vertex] in parts_for_vertex and not graph[order_vertex].isdisjoint(suffix_non_neighbors_of_vertex):
-            parts_for_vertex.remove(part_of[order_vertex])
+        if not graph[order_vertex].isdisjoint(suffix_non_neighbors_of_vertex):
+            parts_for_vertex.discard(part_of[order_vertex])
     return parts_for_vertex
