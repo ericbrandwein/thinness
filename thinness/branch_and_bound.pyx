@@ -16,8 +16,9 @@ def calculate_thinness_with_branch_and_bound(graph: Graph, lower_bound: int = 1,
 
 def calculate_thinness_of_connected_graph(graph: Graph, lower_bound: int = 1, upper_bound: int = None) -> int:
     graph = reduce_graph(graph)
-    if graph.order() <= 1:
+    if graph.is_interval():
         return 1
+    lower_bound = max(lower_bound, 2)
     upper_bound = upper_bound or graph.order() - graph.diameter()
     pathwidth = graph.pathwidth()
     adjacency_matrix = graph.adjacency_matrix()
