@@ -1,12 +1,11 @@
 # cython: profile=True
 cimport cython
 from sage.graphs.graph import Graph
-from sage.graphs.graph_decompositions.vertex_separation import vertex_separation
 from sage.data_structures.bitset import Bitset
 
-from .vertex_separation import solution_from_vertex_separation
 from .consistent_solution import ConsistentSolution
 from .reduce import reduce_graph
+
 
 def calculate_thinness_with_branch_and_bound(graph: Graph, lower_bound: int = 1, upper_bound: int = None) -> int:
     components = [graph.subgraph(component) for component in graph.connected_components()]
@@ -17,15 +16,16 @@ def calculate_thinness_with_branch_and_bound(graph: Graph, lower_bound: int = 1,
 
 def calculate_thinness_of_connected_graph(graph: Graph, lower_bound: int = 1, upper_bound: int = None) -> int:
     graph = reduce_graph(graph)
-    upper_bound = upper_bound or graph.order() - 1
-    _, linear_layout = vertex_separation(graph)
-    initial_solution = solution_from_vertex_separation(graph, linear_layout)
+    if graph.order() <= 1:
+        return 1
+    upper_bound = upper_bound or graph.order() - graph.diameter()
+    pathwidth = graph.pathwidth()
     adjacency_matrix = graph.adjacency_matrix()
     matrix_of_bitsets = [Bitset(''.join(str(element) for element in row)) for row in adjacency_matrix]
     vertices_in_order = Bitset()
 
-    branch_and_bound_thinness = _branch_and_bound(graph.order(), matrix_of_bitsets, Graph(), [], vertices_in_order, lower_bound, min(upper_bound, initial_solution.thinness - 1))
-    return branch_and_bound_thinness or initial_solution.thinness
+    branch_and_bound_thinness = _branch_and_bound(graph.order(), matrix_of_bitsets, Graph(), [], vertices_in_order, lower_bound, min(upper_bound, pathwidth - 1))
+    return branch_and_bound_thinness or pathwidth
 
 
 cdef _branch_and_bound(n: int, graph: list[Bitset], compatibility_graph: Graph, order: list[int], vertices_in_order: Bitset, lower_bound: int, upper_bound: int):
