@@ -16,19 +16,21 @@ def calculate_thinness_with_branch_and_bound(graph: Graph, lower_bound: int = 1,
 
 def calculate_thinness_of_connected_graph(graph: Graph, lower_bound: int = 1, upper_bound: int = None) -> int:
     """upper_bound is exclusive."""
-    graph = reduce_graph(graph)
+    graph, reduced_thinness = reduce_graph(graph)
     if graph.is_interval():
-        return 1
+        return 1 + reduced_thinness
     lower_bound = max(lower_bound, 2)
     if upper_bound is None:
         upper_bound = graph.order()
+    else:
+        upper_bound -= reduced_thinness
     upper_bound = min(upper_bound, _get_best_upper_bound(graph))
     adjacency_matrix = graph.adjacency_matrix()
     matrix_of_bitsets = [Bitset(''.join(str(element) for element in row)) for row in adjacency_matrix]
     vertices_in_order = Bitset()
 
     branch_and_bound_thinness = _branch_and_bound(graph.order(), matrix_of_bitsets, Graph(), [], vertices_in_order, lower_bound, upper_bound - 1)
-    return branch_and_bound_thinness or upper_bound
+    return (branch_and_bound_thinness or upper_bound) + reduced_thinness
 
 
 def _get_best_upper_bound(graph: Graph) -> int:
