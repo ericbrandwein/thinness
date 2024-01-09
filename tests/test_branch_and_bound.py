@@ -4,7 +4,6 @@ from sage.graphs.graph import Graph
 from sage.graphs.graph_generators import graphs
 from sage.misc.randstate import set_random_seed
 
-from thinness.verify import verify_solution
 import pyximport; pyximport.install()
 from thinness.branch_and_bound import calculate_thinness_with_branch_and_bound
 from thinness.z3 import Z3ThinnessSolver
@@ -32,7 +31,7 @@ class TestBranchAndBound(unittest.TestCase):
 
     def test_thinness_of_random_graphs(self):
         set_random_seed(0)
-        n = 7
+        n = 8
         solver = Z3ThinnessSolver(n)
         for _ in range(100):
             graph = graphs.RandomGNP(n, 0.5)
