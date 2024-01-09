@@ -15,18 +15,31 @@ def calculate_thinness_with_branch_and_bound(graph: Graph, lower_bound: int = 1,
 
 
 def calculate_thinness_of_connected_graph(graph: Graph, lower_bound: int = 1, upper_bound: int = None) -> int:
+    """upper_bound is exclusive."""
     graph = reduce_graph(graph)
     if graph.is_interval():
         return 1
     lower_bound = max(lower_bound, 2)
-    upper_bound = upper_bound or graph.order() - graph.diameter()
-    pathwidth = graph.pathwidth()
+    if upper_bound is None:
+        upper_bound = graph.order()
+    upper_bound = min(upper_bound, _get_best_upper_bound(graph))
     adjacency_matrix = graph.adjacency_matrix()
     matrix_of_bitsets = [Bitset(''.join(str(element) for element in row)) for row in adjacency_matrix]
     vertices_in_order = Bitset()
 
-    branch_and_bound_thinness = _branch_and_bound(graph.order(), matrix_of_bitsets, Graph(), [], vertices_in_order, lower_bound, min(upper_bound, pathwidth - 1))
-    return branch_and_bound_thinness or pathwidth
+    branch_and_bound_thinness = _branch_and_bound(graph.order(), matrix_of_bitsets, Graph(), [], vertices_in_order, lower_bound, upper_bound - 1)
+    return branch_and_bound_thinness or upper_bound
+
+
+def _get_best_upper_bound(graph: Graph) -> int:
+    """Get an upper bound for the thinness of a graph that is connected and not interval."""
+    n = graph.order()
+    return min(
+        graph.pathwidth(),
+        n - graph.diameter(),
+        n - graph.clique_number(),
+        n - graph.independent_set(value_only=True),
+    )
 
 
 cdef _branch_and_bound(n: int, graph: list[Bitset], compatibility_graph: Graph, order: list[int], vertices_in_order: Bitset, lower_bound: int, upper_bound: int):
