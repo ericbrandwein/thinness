@@ -1,4 +1,3 @@
-# cython: profile=True
 from sage.graphs.graph import Graph
 from sage.data_structures.bitset import Bitset
 from sage.data_structures.binary_matrix cimport *
@@ -9,7 +8,7 @@ from .reduce import reduce_graph
 
 
 def calculate_thinness_with_branch_and_bound(graph: Graph, lower_bound: int = 1, upper_bound: int = None) -> int:
-    components = [graph.subgraph(component) for component in graph.connected_components()]
+    components = [graph.subgraph(component, immutable=False) for component in graph.connected_components()]
     for component in components:
         component.relabel()
     return max(calculate_thinness_of_connected_graph(component, lower_bound, upper_bound) for component in components)
@@ -40,6 +39,8 @@ def calculate_thinness_of_connected_graph(graph: Graph, lower_bound: int = 1, up
     cdef binary_matrix_t parts_for_vertices
     binary_matrix_init(parts_for_vertices, adjacency_matrix.n_cols, upper_bound - 1)
     
+    cdef set prefixes_seen = set() 
+
     branch_and_bound_thinness = _branch_and_bound(
         graph=adjacency_matrix,
         part_of=part_of,
@@ -48,6 +49,7 @@ def calculate_thinness_of_connected_graph(graph: Graph, lower_bound: int = 1, up
         suffix_vertices=suffix_vertices,
         suffix_non_neighbors_of_vertex=suffix_non_neighbors_of_vertex,
         parts_for_vertices=parts_for_vertices,
+        prefixes_seen=prefixes_seen,
         lower_bound=lower_bound,
         upper_bound=upper_bound - 1
     )
@@ -59,10 +61,10 @@ def calculate_thinness_of_connected_graph(graph: Graph, lower_bound: int = 1, up
     sig_free(part_of)
     binary_matrix_free(parts_for_vertices)
 
-    return (branch_and_bound_thinness or upper_bound)
+    return branch_and_bound_thinness if branch_and_bound_thinness != -1 else upper_bound
 
 
-cdef _branch_and_bound(
+cdef int _branch_and_bound(
     binary_matrix_t graph,
     int* part_of,
     int parts_used,
@@ -70,13 +72,20 @@ cdef _branch_and_bound(
     bitset_t suffix_vertices,
     bitset_t suffix_non_neighbors_of_vertex,
     binary_matrix_t parts_for_vertices,
+    set prefixes_seen,
     int lower_bound, 
     int upper_bound
 ):
     if bitset_isempty(suffix_vertices) and parts_used <= upper_bound:
         return parts_used
+
+    cdef frozenset prefix_with_partition = _build_prefix_with_partition(prefix_vertices, part_of)
+    if prefix_with_partition in prefixes_seen:
+        return -1
+    else:
+        prefixes_seen.add(prefix_with_partition)
     
-    best_solution_found = None
+    cdef int best_solution_found = -1
     cdef int vertex = bitset_next(suffix_vertices, 0)
     cdef bitset_s* parts_for_vertex
     cdef int part
@@ -98,10 +107,11 @@ cdef _branch_and_bound(
                     suffix_vertices, 
                     suffix_non_neighbors_of_vertex,
                     parts_for_vertices,
+                    prefixes_seen,
                     max(lower_bound, current_parts_used), 
                     upper_bound
                 )
-                if current_solution is not None:
+                if current_solution != -1:
                     best_solution_found = current_solution
                     upper_bound = best_solution_found - 1
                     if upper_bound < lower_bound:
@@ -113,6 +123,15 @@ cdef _branch_and_bound(
         bitset_add(suffix_vertices, vertex)
         vertex = bitset_next(suffix_vertices, vertex + 1)
     return best_solution_found
+
+
+cdef inline object _build_prefix_with_partition(bitset_t prefix_vertices, int* part_of):
+    cdef int prefix_vertex = bitset_next(prefix_vertices, 0)
+    cdef list prefix_with_partition = []
+    while prefix_vertex != -1:
+        prefix_with_partition.append((prefix_vertex, part_of[prefix_vertex]))
+        prefix_vertex = bitset_next(prefix_vertices, prefix_vertex + 1)
+    return frozenset(prefix_with_partition) 
 
 
 cdef inline void _get_available_parts_for_vertex(
@@ -131,12 +150,12 @@ cdef inline void _get_available_parts_for_vertex(
 
     cdef bitset_s* parts_for_vertex = parts_for_vertices.rows[vertex]
     bitset_set_first_n(parts_for_vertex, parts_used)
-    cdef int order_vertex = bitset_next(prefix_vertices, 0)
-    while order_vertex != -1:
-        if not bitset_are_disjoint(graph.rows[order_vertex], suffix_non_neighbors_of_vertex):
-            bitset_discard(parts_for_vertex, part_of[order_vertex])
+    cdef int prefix_vertex = bitset_next(prefix_vertices, 0)
+    while prefix_vertex != -1:
+        if not bitset_are_disjoint(graph.rows[prefix_vertex], suffix_non_neighbors_of_vertex):
+            bitset_discard(parts_for_vertex, part_of[prefix_vertex])
             if bitset_isempty(parts_for_vertex):
                 break
-        order_vertex = bitset_next(prefix_vertices, order_vertex + 1)
+        prefix_vertex = bitset_next(prefix_vertices, prefix_vertex + 1)
 
     bitset_add(parts_for_vertex, parts_used)
