@@ -16,14 +16,11 @@ def calculate_thinness_with_branch_and_bound(graph: Graph, lower_bound: int = 1,
 
 def calculate_thinness_of_connected_graph(graph: Graph, lower_bound: int = 1, upper_bound: int = None) -> int:
     """upper_bound is exclusive."""
-    graph, reduced_thinness = reduce_graph(graph)
     if graph.is_interval():
-        return 1 + reduced_thinness
+        return 1
     lower_bound = max(lower_bound, 2)
     if upper_bound is None:
         upper_bound = graph.order()
-    else:
-        upper_bound -= reduced_thinness
     upper_bound = min(upper_bound, _get_best_upper_bound(graph))
 
     cdef binary_matrix_t adjacency_matrix
@@ -48,7 +45,7 @@ def calculate_thinness_of_connected_graph(graph: Graph, lower_bound: int = 1, up
     bitset_free(suffix_vertices)
     bitset_free(suffix_non_neighbors_of_vertex)
 
-    return (branch_and_bound_thinness or upper_bound) + reduced_thinness
+    return (branch_and_bound_thinness or upper_bound)
 
 
 def _get_best_upper_bound(graph: Graph) -> int:
