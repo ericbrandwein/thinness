@@ -3,6 +3,7 @@ from sage.graphs.graph import Graph
 from sage.data_structures.bitset import Bitset
 from sage.data_structures.binary_matrix cimport *
 from sage.graphs.base.static_dense_graph cimport dense_graph_init
+from cysignals.memory cimport check_malloc, sig_malloc, sig_free
 
 from .reduce import reduce_graph
 
@@ -16,36 +17,45 @@ def calculate_thinness_with_branch_and_bound(graph: Graph, lower_bound: int = 1,
 
 def calculate_thinness_of_connected_graph(graph: Graph, lower_bound: int = 1, upper_bound: int = None) -> int:
     """upper_bound is exclusive."""
+    graph, reduced_thinness = reduce_graph(graph)
     if graph.is_interval():
-        return 1
+        return 1 + reduced_thinness
     lower_bound = max(lower_bound, 2)
     if upper_bound is None:
         upper_bound = graph.order()
+    else:
+        upper_bound -= reduced_thinness
     upper_bound = min(upper_bound, _get_best_upper_bound(graph))
 
     cdef binary_matrix_t adjacency_matrix
     dense_graph_init(adjacency_matrix, graph)
+    
     cdef bitset_t suffix_non_neighbors_of_vertex
     bitset_init(suffix_non_neighbors_of_vertex, adjacency_matrix.n_cols)
+    
     cdef bitset_t suffix_vertices
     bitset_init(suffix_vertices, adjacency_matrix.n_cols)
     bitset_complement(suffix_vertices, suffix_vertices)
-    cdef list part_of = [0] * graph.order()
+
+    cdef int* part_of = <int*>sig_malloc(sizeof(int) * adjacency_matrix.n_cols)
+
     branch_and_bound_thinness = _branch_and_bound(
         graph=adjacency_matrix,
         order=[],
-        part_of=part_of, 
+        part_of=part_of,
         parts_used=0,
         suffix_vertices=suffix_vertices,
         suffix_non_neighbors_of_vertex=suffix_non_neighbors_of_vertex,
         lower_bound=lower_bound,
         upper_bound=upper_bound - 1
     )
+
     binary_matrix_free(adjacency_matrix)
     bitset_free(suffix_vertices)
     bitset_free(suffix_non_neighbors_of_vertex)
+    sig_free(part_of)
 
-    return (branch_and_bound_thinness or upper_bound)
+    return (branch_and_bound_thinness or upper_bound) + reduced_thinness
 
 
 def _get_best_upper_bound(graph: Graph) -> int:
@@ -62,7 +72,7 @@ def _get_best_upper_bound(graph: Graph) -> int:
 cdef _branch_and_bound(
     binary_matrix_t graph, 
     list order, 
-    list part_of, 
+    int* part_of,
     int parts_used,
     bitset_t suffix_vertices,
     bitset_t suffix_non_neighbors_of_vertex,
@@ -97,6 +107,7 @@ cdef _branch_and_bound(
                     upper_bound = best_solution_found - 1
                     if upper_bound < lower_bound:
                         order.pop()
+                        bitset_add(suffix_vertices, vertex)
                         return best_solution_found
         order.pop()
         bitset_add(suffix_vertices, vertex)
@@ -108,7 +119,7 @@ cdef inline _get_available_parts_for_vertex(
     binary_matrix_t graph, 
     int vertex, 
     list order, 
-    list part_of, 
+    int* part_of, 
     int parts_used, 
     bitset_t suffix_vertices,
     bitset_t suffix_non_neighbors_of_vertex
@@ -124,5 +135,5 @@ cdef inline _get_available_parts_for_vertex(
             if not parts_for_vertex:
                 break
 
-    parts_for_vertex.add(parts_used + 1)
+    parts_for_vertex.add(parts_used)
     return parts_for_vertex
