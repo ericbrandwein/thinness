@@ -1,5 +1,8 @@
+# cython: profile=True
 from sage.graphs.graph import Graph
 from sage.data_structures.bitset import Bitset
+from sage.data_structures.binary_matrix cimport *
+from sage.graphs.base.static_dense_graph cimport dense_graph_init
 
 from .reduce import reduce_graph
 
@@ -22,11 +25,29 @@ def calculate_thinness_of_connected_graph(graph: Graph, lower_bound: int = 1, up
     else:
         upper_bound -= reduced_thinness
     upper_bound = min(upper_bound, _get_best_upper_bound(graph))
-    adjacency_matrix = graph.adjacency_matrix()
-    matrix_of_bitsets = [Bitset(''.join(str(element) for element in row)) for row in adjacency_matrix]
-    part_of = [0] * graph.order()
 
-    branch_and_bound_thinness = _branch_and_bound(matrix_of_bitsets, [], part_of, 0, lower_bound, upper_bound - 1)
+    cdef binary_matrix_t adjacency_matrix
+    dense_graph_init(adjacency_matrix, graph)
+    cdef bitset_t suffix_non_neighbors_of_vertex
+    bitset_init(suffix_non_neighbors_of_vertex, adjacency_matrix.n_cols)
+    cdef bitset_t suffix_vertices
+    bitset_init(suffix_vertices, adjacency_matrix.n_cols)
+    bitset_complement(suffix_vertices, suffix_vertices)
+    cdef list part_of = [0] * graph.order()
+    branch_and_bound_thinness = _branch_and_bound(
+        graph=adjacency_matrix,
+        order=[],
+        part_of=part_of, 
+        parts_used=0,
+        suffix_vertices=suffix_vertices,
+        suffix_non_neighbors_of_vertex=suffix_non_neighbors_of_vertex,
+        lower_bound=lower_bound,
+        upper_bound=upper_bound - 1
+    )
+    binary_matrix_free(adjacency_matrix)
+    bitset_free(suffix_vertices)
+    bitset_free(suffix_non_neighbors_of_vertex)
+
     return (branch_and_bound_thinness or upper_bound) + reduced_thinness
 
 
@@ -41,22 +62,39 @@ def _get_best_upper_bound(graph: Graph) -> int:
     )
 
 
-cdef _branch_and_bound(graph: list[Bitset], order: list[int], part_of: list[int], parts_used: int, lower_bound: int, upper_bound: int):
-    if set(order) == set(range(len(graph))) and parts_used <= upper_bound:
+cdef _branch_and_bound(
+    binary_matrix_t graph, 
+    list order, 
+    list part_of, 
+    int parts_used,
+    bitset_t suffix_vertices,
+    bitset_t suffix_non_neighbors_of_vertex,
+    int lower_bound, 
+    int upper_bound
+):
+    if set(order) == set(range(graph.n_cols)) and parts_used <= upper_bound:
         return parts_used
     
-    suffix_vertices = Bitset(range(len(graph)))
-    if order:
-        suffix_vertices -= Bitset(order)
     best_solution_found = None
-    for vertex in suffix_vertices:
-        parts_for_vertex = _get_available_parts_for_vertex(graph, vertex, order, part_of, parts_used, suffix_vertices)
+    cdef int vertex = bitset_next(suffix_vertices, 0)
+    while vertex != -1:
+        parts_for_vertex = _get_available_parts_for_vertex(graph, vertex, order, part_of, parts_used, suffix_vertices, suffix_non_neighbors_of_vertex)
         order.append(vertex)
+        bitset_discard(suffix_vertices, vertex)
         for part in parts_for_vertex:
             if part < upper_bound:
                 current_parts_used = max(parts_used, part + 1)
                 part_of[vertex] = part
-                current_solution = _branch_and_bound(graph, order, part_of, current_parts_used, max(lower_bound, current_parts_used), upper_bound)
+                current_solution = _branch_and_bound(
+                    graph, 
+                    order, 
+                    part_of, 
+                    current_parts_used,
+                    suffix_vertices, 
+                    suffix_non_neighbors_of_vertex,
+                    max(lower_bound, current_parts_used), 
+                    upper_bound
+                )
                 if current_solution is not None:
                     best_solution_found = current_solution
                     upper_bound = best_solution_found - 1
@@ -64,17 +102,30 @@ cdef _branch_and_bound(graph: list[Bitset], order: list[int], part_of: list[int]
                         order.pop()
                         return best_solution_found
         order.pop()
+        bitset_add(suffix_vertices, vertex)
+        vertex = bitset_next(suffix_vertices, vertex + 1)
     return best_solution_found
 
 
-cdef inline object _get_available_parts_for_vertex(graph: list[Bitset], vertex: int, order: list[int], part_of: list[int], parts_used: int, suffix_vertices: Bitset):
-    parts_for_vertex = Bitset(range(parts_used + 1))
+cdef inline _get_available_parts_for_vertex(
+    binary_matrix_t graph, 
+    int vertex, 
+    list order, 
+    list part_of, 
+    int parts_used, 
+    bitset_t suffix_vertices,
+    bitset_t suffix_non_neighbors_of_vertex
+):
+    bitset_complement(suffix_non_neighbors_of_vertex, graph.rows[vertex])
+    bitset_intersection(suffix_non_neighbors_of_vertex, suffix_non_neighbors_of_vertex, suffix_vertices)
+    bitset_discard(suffix_non_neighbors_of_vertex, vertex)
 
-    suffix_non_neighbors_of_vertex = graph[vertex].complement()
-    suffix_non_neighbors_of_vertex.intersection_update(suffix_vertices)
-    suffix_non_neighbors_of_vertex.discard(vertex)
-    
+    parts_for_vertex = Bitset(range(parts_used), capacity=parts_used + 1)
     for order_vertex in order:
-        if not graph[order_vertex].isdisjoint(suffix_non_neighbors_of_vertex):
+        if not bitset_are_disjoint(graph.rows[order_vertex], suffix_non_neighbors_of_vertex):
             parts_for_vertex.discard(part_of[order_vertex])
+            if not parts_for_vertex:
+                break
+
+    parts_for_vertex.add(parts_used + 1)
     return parts_for_vertex
