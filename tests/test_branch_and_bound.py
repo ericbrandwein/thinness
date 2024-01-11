@@ -4,7 +4,6 @@ from sage.graphs.graph import Graph
 from sage.graphs.graph_generators import graphs
 from sage.misc.randstate import set_random_seed
 
-import pyximport; pyximport.install()
 from thinness.branch_and_bound import calculate_thinness_with_branch_and_bound
 from thinness.z3 import Z3ThinnessSolver
 
