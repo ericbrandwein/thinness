@@ -27,7 +27,7 @@ def thinness_of_chordal_graphs(n):
 
 
 if __name__ == '__main__':
-    for n in range(1, 8):
+    for n in range(1, 10):
         graph = crown_graph(n)
-        print(n, timeit.timeit("calculate_thinness_with_branch_and_bound(graph)", globals=globals(), number=1))
+        print(n, timeit.timeit("calculate_thinness_with_branch_and_bound(graph, max_prefix_length=100, max_seen_entries=1_600_000)", globals=globals(), number=1))
     
