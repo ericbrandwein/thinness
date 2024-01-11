@@ -7,6 +7,10 @@ from cysignals.memory cimport check_malloc, sig_malloc, sig_free
 from .reduce import reduce_graph
 
 
+MAX_SEEN_PREFIX_LEN = 15
+MAX_SEEN_PREFIXES = 1000000
+
+
 def calculate_thinness_with_branch_and_bound(graph: Graph, lower_bound: int = 1, upper_bound: int = None) -> int:
     components = [graph.subgraph(component, immutable=False) for component in graph.connected_components()]
     for component in components:
@@ -85,11 +89,16 @@ cdef int _branch_and_bound(
     if bitset_isempty(suffix_vertices) and parts_used <= upper_bound:
         return parts_used
 
-    cdef frozenset prefix_with_partition = _build_prefix_with_partition(prefix_vertices, part_of, parts_rename, parts_used)
-    if prefix_with_partition in prefixes_seen:
-        return -1
-    else:
-        prefixes_seen.add(prefix_with_partition)
+    cdef frozenset prefix_with_partition
+    if bitset_len(prefix_vertices) < MAX_SEEN_PREFIX_LEN:
+        prefix_with_partition = _build_prefix_with_partition(prefix_vertices, part_of, parts_rename, parts_used)
+        if prefix_with_partition in prefixes_seen:
+            return -1
+        elif len(prefixes_seen) < MAX_SEEN_PREFIXES:
+            prefixes_seen.add(prefix_with_partition)
+        else:
+            prefixes_seen.pop()
+            prefixes_seen.add(prefix_with_partition)
     
     cdef int best_solution_found = -1
     cdef int vertex = bitset_next(suffix_vertices, 0)
