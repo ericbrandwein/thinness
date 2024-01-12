@@ -5,8 +5,6 @@ from sage.graphs.base.static_dense_graph cimport dense_graph_init
 from cysignals.memory cimport check_malloc, sig_malloc, sig_free
 from cysignals.signals cimport sig_on, sig_off 
 
-from .reduce import reduce_graph
-
 DEFAULT_MAX_PREFIX_LENGTH = 15
 DEFAULT_MAX_SEEN_ENTRIES = 1_000_000
 
