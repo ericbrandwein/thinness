@@ -3,6 +3,7 @@ from sage.data_structures.bitset import Bitset
 from sage.data_structures.binary_matrix cimport *
 from sage.graphs.base.static_dense_graph cimport dense_graph_init
 from cysignals.memory cimport check_malloc, sig_malloc, sig_free
+from cysignals.signals cimport sig_on, sig_off 
 
 from .reduce import reduce_graph
 
@@ -77,6 +78,7 @@ def calculate_thinness_of_connected_graph(
 
     cdef int seen_entries = 0
 
+    sig_on()
     branch_and_bound_thinness = _branch_and_bound(
         graph=adjacency_matrix,
         part_of=part_of,
@@ -96,6 +98,7 @@ def calculate_thinness_of_connected_graph(
         lower_bound=lower_bound,
         upper_bound=max_branch_and_bound_thinness
     )
+    sig_off()
 
     binary_matrix_free(adjacency_matrix)
     bitset_free(prefix_vertices)
