@@ -170,53 +170,99 @@ cdef int _branch_and_bound(
         part = bitset_next(parts_for_vertex, 0)
 
         while part != -1:
-            if part < upper_bound:
+            part_of[vertex] = part
 
-                part_of[vertex] = part
-                current_parts_used = max(parts_used, part + 1)
+            _update_part_neighbors(
+                part_neighbors.rows[part],
+                previous_part_neighbors.rows[vertex],
+                graph.rows[vertex]
+            )
+            
+            current_solution = _branch_and_bound(
+                graph,
+                part_of,
+                parts_rename,
+                parts_used,
+                prefix_vertices,
+                suffix_vertices,
+                part_neighbors,
+                previous_part_neighbors,
+                parts_for_vertices,
+                suffix_neighbors_of_vertex,
+                suffix_neighbors_of_part,
+                seen_states,
+                seen_entries,
+                max_prefix_length,
+                max_seen_entries,
+                lower_bound,
+                upper_bound
+            )
 
-                _update_part_neighbors(
-                    part_neighbors.rows[part],
-                    previous_part_neighbors.rows[vertex],
-                    graph.rows[vertex]
-                )
-                
-                current_solution = _branch_and_bound(
-                    graph,
-                    part_of,
-                    parts_rename,
-                    current_parts_used,
-                    prefix_vertices,
-                    suffix_vertices,
-                    part_neighbors,
-                    previous_part_neighbors,
-                    parts_for_vertices,
-                    suffix_neighbors_of_vertex,
-                    suffix_neighbors_of_part,
-                    seen_states,
-                    seen_entries,
-                    max_prefix_length,
-                    max_seen_entries,
-                    max(lower_bound, current_parts_used),
-                    upper_bound
-                )
+            _undo_update_part_neighbors(
+                part_neighbors.rows[part],
+                previous_part_neighbors.rows[vertex]
+            )
 
-                _undo_update_part_neighbors(
-                    part_neighbors.rows[part],
-                    previous_part_neighbors.rows[vertex]
-                )
-
-                if current_solution != -1:
-                    best_solution_found = current_solution
-                    upper_bound = best_solution_found - 1
-                    if upper_bound < lower_bound:
-                        _move(prefix_vertices, suffix_vertices, vertex)
-                        return best_solution_found
+            if current_solution != -1:
+                best_solution_found = current_solution
+                upper_bound = best_solution_found - 1
+                if upper_bound < lower_bound:
+                    _move(prefix_vertices, suffix_vertices, vertex)
+                    return best_solution_found
 
             part = bitset_next(parts_for_vertex, part + 1)
 
         _move(prefix_vertices, suffix_vertices, vertex)
         vertex = bitset_next(suffix_vertices, vertex + 1)
+
+    if parts_used < upper_bound:
+        part = parts_used
+        current_parts_used = parts_used + 1
+        vertex = bitset_next(suffix_vertices, 0)
+        while vertex != -1:
+            _move(suffix_vertices, prefix_vertices, vertex)
+            part_of[vertex] = part
+
+            _update_part_neighbors(
+                part_neighbors.rows[part],
+                previous_part_neighbors.rows[vertex],
+                graph.rows[vertex]
+            )
+
+            current_solution = _branch_and_bound(
+                graph,
+                part_of,
+                parts_rename,
+                current_parts_used,
+                prefix_vertices,
+                suffix_vertices,
+                part_neighbors,
+                previous_part_neighbors,
+                parts_for_vertices,
+                suffix_neighbors_of_vertex,
+                suffix_neighbors_of_part,
+                seen_states,
+                seen_entries,
+                max_prefix_length,
+                max_seen_entries,
+                max(lower_bound, current_parts_used),
+                upper_bound
+            )
+
+            _undo_update_part_neighbors(
+                part_neighbors.rows[part],
+                previous_part_neighbors.rows[vertex]
+            )
+
+            if current_solution != -1:
+                best_solution_found = current_solution
+                upper_bound = best_solution_found - 1
+                if upper_bound < lower_bound:
+                    _move(prefix_vertices, suffix_vertices, vertex)
+                    return best_solution_found
+            
+            _move(prefix_vertices, suffix_vertices, vertex)
+            vertex = bitset_next(suffix_vertices, vertex + 1)
 
     return best_solution_found
 
@@ -318,8 +364,6 @@ cdef inline bitset_s* _get_available_parts_for_vertex(
             suffix_neighbors_of_part
         ):
             bitset_add(parts_for_vertex, part)
-
-    bitset_add(parts_for_vertex, parts_used)
     return parts_for_vertex
 
 
