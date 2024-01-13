@@ -81,43 +81,43 @@ def calculate_thinness_of_connected_graph(
     cdef dict seen_states = dict() 
 
     cdef int seen_entries = 0
-
-    sig_on()
-    branch_and_bound_thinness = _branch_and_bound(
-        graph=adjacency_matrix,
-        part_of=part_of,
-        parts_rename=parts_rename,
-        parts_used=0,
-        prefix_vertices=prefix_vertices,
-        suffix_vertices=suffix_vertices,
-        new_prefixes=new_prefixes,
-        new_suffixes=new_suffixes,
-        part_neighbors=part_neighbors,
-        previous_part_neighbors=previous_part_neighbors,
-        parts_for_vertices=parts_for_vertices,
-        suffix_neighbors_of_vertex=suffix_neighbors_of_vertex,
-        suffix_neighbors_of_part=suffix_neighbors_of_part,
-        seen_states=seen_states,
-        seen_entries=&seen_entries,
-        max_prefix_length=max_prefix_length,
-        max_seen_entries=max_seen_entries,
-        lower_bound=lower_bound,
-        upper_bound=max_branch_and_bound_thinness
-    )
-    sig_off()
-
-    binary_matrix_free(adjacency_matrix)
-    bitset_free(prefix_vertices)
-    bitset_free(suffix_vertices)
-    binary_matrix_free(new_prefixes)
-    binary_matrix_free(new_suffixes)
-    sig_free(part_of)
-    sig_free(parts_rename)
-    binary_matrix_free(part_neighbors)
-    binary_matrix_free(previous_part_neighbors)
-    binary_matrix_free(parts_for_vertices)
-    bitset_free(suffix_neighbors_of_vertex)
-    bitset_free(suffix_neighbors_of_part)
+    try:
+        sig_on()
+        branch_and_bound_thinness = _branch_and_bound(
+            graph=adjacency_matrix,
+            part_of=part_of,
+            parts_rename=parts_rename,
+            parts_used=0,
+            prefix_vertices=prefix_vertices,
+            suffix_vertices=suffix_vertices,
+            new_prefixes=new_prefixes,
+            new_suffixes=new_suffixes,
+            part_neighbors=part_neighbors,
+            previous_part_neighbors=previous_part_neighbors,
+            parts_for_vertices=parts_for_vertices,
+            suffix_neighbors_of_vertex=suffix_neighbors_of_vertex,
+            suffix_neighbors_of_part=suffix_neighbors_of_part,
+            seen_states=seen_states,
+            seen_entries=&seen_entries,
+            max_prefix_length=max_prefix_length,
+            max_seen_entries=max_seen_entries,
+            lower_bound=lower_bound,
+            upper_bound=max_branch_and_bound_thinness
+        )
+        sig_off()
+    finally:
+        binary_matrix_free(adjacency_matrix)
+        bitset_free(prefix_vertices)
+        bitset_free(suffix_vertices)
+        binary_matrix_free(new_prefixes)
+        binary_matrix_free(new_suffixes)
+        sig_free(part_of)
+        sig_free(parts_rename)
+        binary_matrix_free(part_neighbors)
+        binary_matrix_free(previous_part_neighbors)
+        binary_matrix_free(parts_for_vertices)
+        bitset_free(suffix_neighbors_of_vertex)
+        bitset_free(suffix_neighbors_of_part)
 
     return branch_and_bound_thinness if branch_and_bound_thinness != -1 else upper_bound
 
