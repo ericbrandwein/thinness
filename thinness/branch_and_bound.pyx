@@ -47,36 +47,38 @@ def calculate_thinness_of_connected_graph(
     cdef binary_matrix_t adjacency_matrix
     dense_graph_init(adjacency_matrix, graph)
 
+    cdef int n = adjacency_matrix.n_cols
+
     cdef bitset_t prefix_vertices
-    bitset_init(prefix_vertices, adjacency_matrix.n_cols)
+    bitset_init(prefix_vertices, n)
 
     cdef bitset_t suffix_vertices
-    bitset_init(suffix_vertices, adjacency_matrix.n_cols)
+    bitset_init(suffix_vertices, n)
     bitset_complement(suffix_vertices, suffix_vertices)
 
     cdef binary_matrix_t new_prefixes
-    binary_matrix_init(new_prefixes, adjacency_matrix.n_cols, adjacency_matrix.n_cols)
+    binary_matrix_init(new_prefixes, n, n)
 
     cdef binary_matrix_t new_suffixes
-    binary_matrix_init(new_suffixes, adjacency_matrix.n_cols, adjacency_matrix.n_cols)
+    binary_matrix_init(new_suffixes, n, n)
     
-    cdef int* part_of = <int*>sig_malloc(sizeof(int) * adjacency_matrix.n_cols)
+    cdef int* part_of = <int*>sig_malloc(sizeof(int) * n)
     cdef int* parts_rename = <int*>sig_malloc(sizeof(int) * max_branch_and_bound_thinness)
 
     cdef binary_matrix_t part_neighbors
-    binary_matrix_init(part_neighbors, max_branch_and_bound_thinness, adjacency_matrix.n_cols)
+    binary_matrix_init(part_neighbors, max_branch_and_bound_thinness, n)
 
     cdef binary_matrix_t previous_part_neighbors
-    binary_matrix_init(previous_part_neighbors, adjacency_matrix.n_cols, adjacency_matrix.n_cols)
+    binary_matrix_init(previous_part_neighbors, n, n)
 
     cdef binary_matrix_t parts_for_vertices
-    binary_matrix_init(parts_for_vertices, adjacency_matrix.n_cols, max_branch_and_bound_thinness)
+    binary_matrix_init(parts_for_vertices, n, max_branch_and_bound_thinness)
     
     cdef bitset_t suffix_neighbors_of_vertex
-    bitset_init(suffix_neighbors_of_vertex, adjacency_matrix.n_cols)
+    bitset_init(suffix_neighbors_of_vertex, n)
 
     cdef bitset_t suffix_neighbors_of_part
-    bitset_init(suffix_neighbors_of_part, adjacency_matrix.n_cols)    
+    bitset_init(suffix_neighbors_of_part, n)    
     
     cdef dict seen_states = dict() 
 
