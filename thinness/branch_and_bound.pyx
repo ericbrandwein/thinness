@@ -49,11 +49,17 @@ def calculate_thinness_of_connected_graph(
 
     cdef bitset_t prefix_vertices
     bitset_init(prefix_vertices, adjacency_matrix.n_cols)
-    
+
     cdef bitset_t suffix_vertices
     bitset_init(suffix_vertices, adjacency_matrix.n_cols)
     bitset_complement(suffix_vertices, suffix_vertices)
 
+    cdef binary_matrix_t new_prefixes
+    binary_matrix_init(new_prefixes, adjacency_matrix.n_cols, adjacency_matrix.n_cols)
+
+    cdef binary_matrix_t new_suffixes
+    binary_matrix_init(new_suffixes, adjacency_matrix.n_cols, adjacency_matrix.n_cols)
+    
     cdef int* part_of = <int*>sig_malloc(sizeof(int) * adjacency_matrix.n_cols)
     cdef int* parts_rename = <int*>sig_malloc(sizeof(int) * max_branch_and_bound_thinness)
 
@@ -70,7 +76,7 @@ def calculate_thinness_of_connected_graph(
     bitset_init(suffix_neighbors_of_vertex, adjacency_matrix.n_cols)
 
     cdef bitset_t suffix_neighbors_of_part
-    bitset_init(suffix_neighbors_of_part, adjacency_matrix.n_cols)
+    bitset_init(suffix_neighbors_of_part, adjacency_matrix.n_cols)    
     
     cdef dict seen_states = dict() 
 
@@ -84,6 +90,8 @@ def calculate_thinness_of_connected_graph(
         parts_used=0,
         prefix_vertices=prefix_vertices,
         suffix_vertices=suffix_vertices,
+        new_prefixes=new_prefixes,
+        new_suffixes=new_suffixes,
         part_neighbors=part_neighbors,
         previous_part_neighbors=previous_part_neighbors,
         parts_for_vertices=parts_for_vertices,
@@ -101,6 +109,8 @@ def calculate_thinness_of_connected_graph(
     binary_matrix_free(adjacency_matrix)
     bitset_free(prefix_vertices)
     bitset_free(suffix_vertices)
+    binary_matrix_free(new_prefixes)
+    binary_matrix_free(new_suffixes)
     sig_free(part_of)
     sig_free(parts_rename)
     binary_matrix_free(part_neighbors)
@@ -119,6 +129,8 @@ cdef int _branch_and_bound(
     int parts_used,
     bitset_t prefix_vertices,
     bitset_t suffix_vertices,
+    binary_matrix_t new_prefixes,
+    binary_matrix_t new_suffixes,
     binary_matrix_t part_neighbors,
     binary_matrix_t previous_part_neighbors,
     binary_matrix_t parts_for_vertices,
@@ -131,14 +143,32 @@ cdef int _branch_and_bound(
     int lower_bound,
     int upper_bound
 ):
-    if bitset_isempty(suffix_vertices) and parts_used <= upper_bound:
+    cdef int level = bitset_len(prefix_vertices)
+    cdef bitset_t new_prefix = new_prefixes.rows[level]
+    bitset_copy(new_prefix, prefix_vertices)
+
+    cdef bitset_t new_suffix = new_suffixes.rows[level]
+    bitset_copy(new_suffix, suffix_vertices)
+
+    _increment_prefix_greedily(
+        graph,
+        new_prefix,
+        new_suffix,
+        parts_used,
+        part_of,
+        part_neighbors,
+        suffix_neighbors_of_vertex,
+        suffix_neighbors_of_part
+    )
+
+    if bitset_isempty(new_suffix) and parts_used <= upper_bound:
         return parts_used
 
     if _check_state_seen(
         seen_states,
         seen_entries,
-        prefix_vertices,
-        suffix_vertices,
+        new_prefix,
+        new_suffix,
         parts_used,
         part_neighbors,
         suffix_neighbors_of_part,
@@ -148,18 +178,18 @@ cdef int _branch_and_bound(
         return -1
     
     cdef int best_solution_found = -1
-    cdef int vertex = bitset_next(suffix_vertices, 0)
+    cdef int vertex = bitset_next(new_suffix, 0)
     cdef bitset_s* parts_for_vertex
     cdef int part
     while vertex != -1:
-        _move(suffix_vertices, prefix_vertices, vertex)
+        _move(new_suffix, new_prefix, vertex)
 
         parts_for_vertex = _get_available_parts_for_vertex(
             vertex, 
             parts_used,
             parts_for_vertices,
             part_neighbors,
-            suffix_vertices,
+            new_suffix,
             graph.rows[vertex],
             suffix_neighbors_of_vertex,
             suffix_neighbors_of_part
@@ -181,8 +211,10 @@ cdef int _branch_and_bound(
                 part_of,
                 parts_rename,
                 parts_used,
-                prefix_vertices,
-                suffix_vertices,
+                new_prefix,
+                new_suffix,
+                new_prefixes,
+                new_suffixes,
                 part_neighbors,
                 previous_part_neighbors,
                 parts_for_vertices,
@@ -205,20 +237,19 @@ cdef int _branch_and_bound(
                 best_solution_found = current_solution
                 upper_bound = best_solution_found - 1
                 if upper_bound < lower_bound:
-                    _move(prefix_vertices, suffix_vertices, vertex)
                     return best_solution_found
 
             part = bitset_next(parts_for_vertex, part + 1)
 
-        _move(prefix_vertices, suffix_vertices, vertex)
-        vertex = bitset_next(suffix_vertices, vertex + 1)
+        _move(new_prefix, new_suffix, vertex)
+        vertex = bitset_next(new_suffix, vertex + 1)
 
     if parts_used < upper_bound:
         part = parts_used
         current_parts_used = parts_used + 1
-        vertex = bitset_next(suffix_vertices, 0)
+        vertex = bitset_next(new_suffix, 0)
         while vertex != -1:
-            _move(suffix_vertices, prefix_vertices, vertex)
+            _move(new_suffix, new_prefix, vertex)
             part_of[vertex] = part
 
             _update_part_neighbors(
@@ -232,8 +263,10 @@ cdef int _branch_and_bound(
                 part_of,
                 parts_rename,
                 current_parts_used,
-                prefix_vertices,
-                suffix_vertices,
+                new_prefix,
+                new_suffix,
+                new_prefixes,
+                new_suffixes,
                 part_neighbors,
                 previous_part_neighbors,
                 parts_for_vertices,
@@ -256,13 +289,92 @@ cdef int _branch_and_bound(
                 best_solution_found = current_solution
                 upper_bound = best_solution_found - 1
                 if upper_bound < lower_bound:
-                    _move(prefix_vertices, suffix_vertices, vertex)
                     return best_solution_found
             
-            _move(prefix_vertices, suffix_vertices, vertex)
-            vertex = bitset_next(suffix_vertices, vertex + 1)
+            _move(new_prefix, new_suffix, vertex)
+            vertex = bitset_next(new_suffix, vertex + 1)
 
     return best_solution_found
+
+
+cdef inline void _increment_prefix_greedily(
+    binary_matrix_t graph,
+    bitset_t prefix_vertices,
+    bitset_t suffix_vertices,
+    int parts_used,
+    int* part_of,
+    binary_matrix_t part_neighbors,
+    bitset_t suffix_neighbors_of_vertex,
+    bitset_t suffix_neighbors_of_part,
+):
+    """Add to prefix all vertices that have the same suffix neighbors as one of the parts."""
+    cdef int vertex
+    cdef int part
+    cdef bint prefix_changed = True
+    while prefix_changed:
+        prefix_changed = False
+        vertex = bitset_next(suffix_vertices, 0)
+        while vertex != -1:
+            _move(suffix_vertices, prefix_vertices, vertex)
+
+            part = _find_greedy_part_for_vertex(
+                vertex,
+                graph,
+                suffix_vertices,
+                parts_used,
+                part_neighbors,
+                suffix_neighbors_of_vertex,
+                suffix_neighbors_of_part,
+            )
+
+            if part != -1:
+                part_of[vertex] = part
+                prefix_changed = True
+                break
+            else:
+                _move(prefix_vertices, suffix_vertices, vertex)
+                vertex = bitset_next(suffix_vertices, vertex + 1)
+
+
+cdef inline int _find_greedy_part_for_vertex(
+    int vertex,
+    binary_matrix_t graph,
+    bitset_t suffix_vertices,
+    int parts_used,
+    binary_matrix_t part_neighbors,
+    bitset_t suffix_neighbors_of_vertex,
+    bitset_t suffix_neighbors_of_part,
+):
+    bitset_intersection(
+        suffix_neighbors_of_vertex, 
+        graph.rows[vertex], 
+        suffix_vertices
+    )
+    for part in range(parts_used):
+        if _is_greedy_part_for_vertex(
+            part,
+            suffix_vertices,
+            part_neighbors,
+            suffix_neighbors_of_vertex,
+            suffix_neighbors_of_part,
+        ):
+            return part
+    return -1
+
+
+cdef inline bint _is_greedy_part_for_vertex(
+    int part,
+    bitset_t suffix_vertices,
+    binary_matrix_t part_neighbors,
+    bitset_t suffix_neighbors_of_vertex,
+    bitset_t suffix_neighbors_of_part,
+):
+    bitset_intersection(
+        suffix_neighbors_of_part,
+        part_neighbors.rows[part],
+        suffix_vertices
+    )
+    return bitset_eq(suffix_neighbors_of_part, suffix_neighbors_of_vertex)
 
 
 cdef inline bint _check_state_seen(
