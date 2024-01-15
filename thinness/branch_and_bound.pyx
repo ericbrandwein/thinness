@@ -56,9 +56,6 @@ def calculate_thinness_of_connected_graph(
     bitset_init(suffix_vertices, n)
     bitset_complement(suffix_vertices, suffix_vertices)
 
-    cdef binary_matrix_t new_prefixes
-    binary_matrix_init(new_prefixes, n, n)
-
     cdef binary_matrix_t new_suffixes
     binary_matrix_init(new_suffixes, n, n)
     
@@ -93,7 +90,6 @@ def calculate_thinness_of_connected_graph(
             parts_used=0,
             prefix_vertices=prefix_vertices,
             suffix_vertices=suffix_vertices,
-            new_prefixes=new_prefixes,
             new_suffixes=new_suffixes,
             part_neighbors=part_neighbors,
             previous_part_neighbors=previous_part_neighbors,
@@ -112,7 +108,6 @@ def calculate_thinness_of_connected_graph(
         binary_matrix_free(adjacency_matrix)
         bitset_free(prefix_vertices)
         bitset_free(suffix_vertices)
-        binary_matrix_free(new_prefixes)
         binary_matrix_free(new_suffixes)
         sig_free(part_of)
         sig_free(parts_rename)
@@ -132,7 +127,6 @@ cdef int _branch_and_bound(
     int parts_used,
     bitset_t prefix_vertices,
     bitset_t suffix_vertices,
-    binary_matrix_t new_prefixes,
     binary_matrix_t new_suffixes,
     binary_matrix_t part_neighbors,
     binary_matrix_t previous_part_neighbors,
@@ -146,16 +140,13 @@ cdef int _branch_and_bound(
     int max_prefix_length,
     int max_seen_entries,
 ):
-    cdef int level = bitset_len(prefix_vertices)
-    cdef bitset_t new_prefix = new_prefixes.rows[level]
-    bitset_copy(new_prefix, prefix_vertices)
-
+    cdef int level = suffix_vertices.size - bitset_len(suffix_vertices)
+  
     cdef bitset_t new_suffix = new_suffixes.rows[level]
     bitset_copy(new_suffix, suffix_vertices)
 
     _increment_prefix_greedily_on_existing_parts(
         graph,
-        new_prefix,
         new_suffix,
         parts_used,
         part_of,
@@ -170,7 +161,7 @@ cdef int _branch_and_bound(
     if _check_state_seen(
         seen_states,
         seen_entries,
-        new_prefix,
+        prefix_vertices,
         new_suffix,
         parts_used,
         part_neighbors,
@@ -185,9 +176,8 @@ cdef int _branch_and_bound(
         part_of,
         parts_rename,
         parts_used,
-        new_prefix,
+        prefix_vertices,
         new_suffix,
-        new_prefixes,
         new_suffixes,
         part_neighbors,
         previous_part_neighbors,
@@ -212,7 +202,7 @@ cdef int _branch_and_bound(
         vertex_added_on_new_part = _add_vertex_to_prefix_greedily_on_part(
             part,
             graph,
-            new_prefix,
+            prefix_vertices,
             new_suffix,
             suffix_neighbors_of_vertex,
             suffix_neighbors_of_part,
@@ -226,9 +216,8 @@ cdef int _branch_and_bound(
                 part_of,
                 parts_rename,
                 parts_used,
-                new_prefix,
+                prefix_vertices,
                 new_suffix,
-                new_prefixes,
                 new_suffixes,
                 part_neighbors,
                 previous_part_neighbors,
@@ -248,9 +237,8 @@ cdef int _branch_and_bound(
                 part_of,
                 parts_rename,
                 parts_used,
-                new_prefix,
+                prefix_vertices,
                 new_suffix,
-                new_prefixes,
                 new_suffixes,
                 part_neighbors,
                 previous_part_neighbors,
@@ -278,7 +266,6 @@ cdef inline int _branch_adding_to_existing_part(
     int parts_used,
     bitset_t prefix_vertices,
     bitset_t suffix_vertices,
-    binary_matrix_t new_prefixes,
     binary_matrix_t new_suffixes,
     binary_matrix_t part_neighbors,
     binary_matrix_t previous_part_neighbors,
@@ -297,7 +284,7 @@ cdef inline int _branch_adding_to_existing_part(
     cdef int part
     cdef int vertex = bitset_next(suffix_vertices, 0)
     while vertex != -1:
-        _move(suffix_vertices, prefix_vertices, vertex)
+        bitset_discard(suffix_vertices, vertex)
 
         parts_for_vertex = _get_available_parts_for_vertex(
             vertex, 
@@ -321,7 +308,6 @@ cdef inline int _branch_adding_to_existing_part(
                 parts_used,
                 prefix_vertices,
                 suffix_vertices,
-                new_prefixes,
                 new_suffixes,
                 part_neighbors,
                 previous_part_neighbors,
@@ -345,7 +331,7 @@ cdef inline int _branch_adding_to_existing_part(
                 
             part = bitset_next(parts_for_vertex, part + 1)
 
-        _move(prefix_vertices, suffix_vertices, vertex)
+        bitset_add(suffix_vertices, vertex)
         vertex = bitset_next(suffix_vertices, vertex + 1)
     
     return best_solution_found
@@ -358,7 +344,6 @@ cdef inline int _branch_adding_to_new_part(
     int parts_used,
     bitset_t prefix_vertices,
     bitset_t suffix_vertices,
-    binary_matrix_t new_prefixes,
     binary_matrix_t new_suffixes,
     binary_matrix_t part_neighbors,
     binary_matrix_t previous_part_neighbors,
@@ -376,7 +361,7 @@ cdef inline int _branch_adding_to_new_part(
     cdef int part = parts_used - 1
     cdef int vertex = bitset_next(suffix_vertices, 0)
     while vertex != -1:
-        _move(suffix_vertices, prefix_vertices, vertex)
+        bitset_discard(suffix_vertices, vertex)
 
         current_solution = _branch_with_vertex_on_part(
             vertex,
@@ -387,7 +372,6 @@ cdef inline int _branch_adding_to_new_part(
             parts_used,
             prefix_vertices,
             suffix_vertices,
-            new_prefixes,
             new_suffixes,
             part_neighbors,
             previous_part_neighbors,
@@ -409,7 +393,7 @@ cdef inline int _branch_adding_to_new_part(
             else:    
                 upper_bound = best_solution_found - 1
         
-        _move(prefix_vertices, suffix_vertices, vertex)
+        bitset_add(suffix_vertices, vertex)
         vertex = bitset_next(suffix_vertices, vertex + 1)
 
     return best_solution_found
@@ -424,7 +408,6 @@ cdef inline int _branch_with_vertex_on_part(
     int parts_used,
     bitset_t prefix_vertices,
     bitset_t suffix_vertices,
-    binary_matrix_t new_prefixes,
     binary_matrix_t new_suffixes,
     binary_matrix_t part_neighbors,
     binary_matrix_t previous_part_neighbors,
@@ -453,7 +436,6 @@ cdef inline int _branch_with_vertex_on_part(
         parts_used,
         prefix_vertices,
         suffix_vertices,
-        new_prefixes,
         new_suffixes,
         part_neighbors,
         previous_part_neighbors,
@@ -478,7 +460,6 @@ cdef inline int _branch_with_vertex_on_part(
 
 cdef inline void _increment_prefix_greedily_on_existing_parts(
     binary_matrix_t graph,
-    bitset_t prefix_vertices,
     bitset_t suffix_vertices,
     int parts_used,
     int* part_of,
@@ -489,12 +470,12 @@ cdef inline void _increment_prefix_greedily_on_existing_parts(
     """Add to prefix all vertices that have the same suffix neighbors as one of the parts."""
     cdef int vertex
     cdef int part
-    cdef bint prefix_changed = True
-    while prefix_changed:
-        prefix_changed = False
+    cdef bint suffix_changed = True
+    while suffix_changed:
+        suffix_changed = False
         vertex = bitset_next(suffix_vertices, 0)
         while vertex != -1:
-            _move(suffix_vertices, prefix_vertices, vertex)
+            bitset_discard(suffix_vertices, vertex)
 
             part = _find_greedy_part_for_vertex(
                 vertex,
@@ -508,9 +489,9 @@ cdef inline void _increment_prefix_greedily_on_existing_parts(
 
             if part != -1:
                 part_of[vertex] = part
-                prefix_changed = True
+                suffix_changed = True
             else:
-                _move(prefix_vertices, suffix_vertices, vertex)
+                bitset_add(suffix_vertices, vertex)
 
             vertex = bitset_next(suffix_vertices, vertex + 1)
 
@@ -528,7 +509,7 @@ cdef inline bint _add_vertex_to_prefix_greedily_on_part(
     cdef bint can_be_added
     cdef int vertex = bitset_next(suffix_vertices, 0)
     while vertex != -1:
-        _move(suffix_vertices, prefix_vertices, vertex)
+        bitset_discard(suffix_vertices, vertex)
 
         bitset_intersection(
             suffix_neighbors_of_vertex, 
@@ -547,7 +528,7 @@ cdef inline bint _add_vertex_to_prefix_greedily_on_part(
             part_of[vertex] = part
             return True
 
-        _move(prefix_vertices, suffix_vertices, vertex)
+        bitset_add(suffix_vertices, vertex)
         vertex = bitset_next(suffix_vertices, vertex + 1)
     
     return False 
@@ -605,6 +586,7 @@ cdef inline bint _check_state_seen(
     int max_prefix_length,
     int max_seen_entries
 ):
+    bitset_complement(prefix_vertices, suffix_vertices)
     if bitset_len(prefix_vertices) > max_prefix_length:
         return False
 
@@ -646,11 +628,6 @@ cdef inline _build_frozen_part_neighbors(
         suffix_neighbors_of_part_set = frozenset(bitset_list(suffix_neighbors_of_part))
         suffix_part_neighbors.add(suffix_neighbors_of_part_set)
     return frozenset(suffix_part_neighbors)
-        
-
-cdef inline void _move(bitset_t bitset_from, bitset_t bitset_to, int vertex):
-    bitset_remove(bitset_from, vertex)
-    bitset_add(bitset_to, vertex)
 
 
 cdef inline void _update_part_neighbors(
