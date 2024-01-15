@@ -180,36 +180,70 @@ cdef int _branch_and_bound(
     ):
         return -1
     
-    cdef int best_solution_found = -1
-    cdef int vertex = bitset_next(new_suffix, 0)
-    cdef bitset_s* parts_for_vertex
+    cdef int best_solution_found = _branch_adding_to_existing_part(
+        graph,
+        part_of,
+        parts_rename,
+        parts_used,
+        new_prefix,
+        new_suffix,
+        new_prefixes,
+        new_suffixes,
+        part_neighbors,
+        previous_part_neighbors,
+        parts_for_vertices,
+        suffix_neighbors_of_vertex,
+        suffix_neighbors_of_part,
+        seen_states,
+        seen_entries,
+        max_prefix_length,
+        max_seen_entries,
+        lower_bound,
+        upper_bound
+    )
+    
+    cdef int new_part_solution
     cdef int part
-    while vertex != -1:
-        _move(new_suffix, new_prefix, vertex)
-
-        parts_for_vertex = _get_available_parts_for_vertex(
-            vertex, 
-            parts_used,
-            parts_for_vertices,
-            part_neighbors,
+    cdef int vertex_added_on_new_part
+    if parts_used < upper_bound:
+        parts_used += 1
+        part = parts_used - 1
+        lower_bound = max(lower_bound, parts_used)
+        vertex_added_on_new_part = _add_vertex_to_prefix_greedily_on_part(
+            part,
+            graph,
+            new_prefix,
             new_suffix,
-            graph.rows[vertex],
             suffix_neighbors_of_vertex,
-            suffix_neighbors_of_part
+            suffix_neighbors_of_part,
+            part_of,
+            part_neighbors,
         )
-
-        part = bitset_next(parts_for_vertex, 0)
-
-        while part != -1:
-            part_of[vertex] = part
-
-            _update_part_neighbors(
-                part_neighbors.rows[part],
-                previous_part_neighbors.rows[vertex],
-                graph.rows[vertex]
+        
+        if vertex_added_on_new_part:
+            new_part_solution = _branch_and_bound(
+                graph,
+                part_of,
+                parts_rename,
+                parts_used,
+                new_prefix,
+                new_suffix,
+                new_prefixes,
+                new_suffixes,
+                part_neighbors,
+                previous_part_neighbors,
+                parts_for_vertices,
+                suffix_neighbors_of_vertex,
+                suffix_neighbors_of_part,
+                seen_states,
+                seen_entries,
+                max_prefix_length,
+                max_seen_entries,
+                lower_bound,
+                upper_bound
             )
-            
-            current_solution = _branch_and_bound(
+        else:
+            new_part_solution = _branch_adding_to_new_part(
                 graph,
                 part_of,
                 parts_rename,
@@ -231,46 +265,62 @@ cdef int _branch_and_bound(
                 upper_bound
             )
 
-            _undo_update_part_neighbors(
-                part_neighbors.rows[part],
-                previous_part_neighbors.rows[vertex]
-            )
+        if new_part_solution != -1:
+            best_solution_found = new_part_solution
 
-            if current_solution != -1:
-                best_solution_found = current_solution
-                upper_bound = best_solution_found - 1
-                if upper_bound < lower_bound:
-                    return best_solution_found
+    return best_solution_found
 
-            part = bitset_next(parts_for_vertex, part + 1)
 
-        _move(new_prefix, new_suffix, vertex)
-        vertex = bitset_next(new_suffix, vertex + 1)
+cdef inline int _branch_adding_to_existing_part(
+    binary_matrix_t graph,
+    int* part_of,
+    int* parts_rename,
+    int parts_used,
+    bitset_t prefix_vertices,
+    bitset_t suffix_vertices,
+    binary_matrix_t new_prefixes,
+    binary_matrix_t new_suffixes,
+    binary_matrix_t part_neighbors,
+    binary_matrix_t previous_part_neighbors,
+    binary_matrix_t parts_for_vertices,
+    bitset_t suffix_neighbors_of_vertex,
+    bitset_t suffix_neighbors_of_part,
+    dict seen_states,
+    int* seen_entries,
+    int max_prefix_length,
+    int max_seen_entries,
+    int lower_bound,
+    int upper_bound
+):
+    cdef int best_solution_found = -1
+    cdef bitset_t parts_for_vertex
+    cdef int part
+    cdef int vertex = bitset_next(suffix_vertices, 0)
+    while vertex != -1:
+        _move(suffix_vertices, prefix_vertices, vertex)
 
-    cdef int vertex_added_on_new_part
-    if parts_used < upper_bound:
-        part = parts_used
-        parts_used += 1
-
-        vertex_added_on_new_part = _add_vertex_to_prefix_greedily_on_part(
-            part,
-            graph,
-            new_prefix,
-            new_suffix,
-            suffix_neighbors_of_vertex,
-            suffix_neighbors_of_part,
-            part_of,
+        parts_for_vertex = _get_available_parts_for_vertex(
+            vertex, 
+            parts_used,
+            parts_for_vertices,
             part_neighbors,
+            suffix_vertices,
+            graph.rows[vertex],
+            suffix_neighbors_of_vertex,
+            suffix_neighbors_of_part
         )
 
-        if vertex_added_on_new_part:
-            current_solution = _branch_and_bound(
+        part = bitset_next(parts_for_vertex, 0)
+        while part != -1:
+            current_solution = _branch_with_vertex_on_part(
+                vertex,
+                part,
                 graph,
                 part_of,
                 parts_rename,
                 parts_used,
-                new_prefix,
-                new_suffix,
+                prefix_vertices,
+                suffix_vertices,
                 new_prefixes,
                 new_suffixes,
                 part_neighbors,
@@ -282,61 +332,148 @@ cdef int _branch_and_bound(
                 seen_entries,
                 max_prefix_length,
                 max_seen_entries,
-                max(lower_bound, parts_used),
+                lower_bound,
                 upper_bound
             )
 
             if current_solution != -1:
                 best_solution_found = current_solution
-        else:
-            vertex = bitset_next(new_suffix, 0)
-            while vertex != -1:
-                _move(new_suffix, new_prefix, vertex)
-                part_of[vertex] = part
-
-                _update_part_neighbors(
-                    part_neighbors.rows[part],
-                    previous_part_neighbors.rows[vertex],
-                    graph.rows[vertex]
-                )
-
-                current_solution = _branch_and_bound(
-                    graph,
-                    part_of,
-                    parts_rename,
-                    parts_used,
-                    new_prefix,
-                    new_suffix,
-                    new_prefixes,
-                    new_suffixes,
-                    part_neighbors,
-                    previous_part_neighbors,
-                    parts_for_vertices,
-                    suffix_neighbors_of_vertex,
-                    suffix_neighbors_of_part,
-                    seen_states,
-                    seen_entries,
-                    max_prefix_length,
-                    max_seen_entries,
-                    max(lower_bound, parts_used),
-                    upper_bound
-                )
-
-                _undo_update_part_neighbors(
-                    part_neighbors.rows[part],
-                    previous_part_neighbors.rows[vertex]
-                )
-
-                if current_solution != -1:
-                    best_solution_found = current_solution
+                if best_solution_found <= lower_bound:
+                    return best_solution_found
+                else:    
                     upper_bound = best_solution_found - 1
-                    if upper_bound < lower_bound:
-                        return best_solution_found
                 
-                _move(new_prefix, new_suffix, vertex)
-                vertex = bitset_next(new_suffix, vertex + 1)
+            part = bitset_next(parts_for_vertex, part + 1)
+
+        _move(prefix_vertices, suffix_vertices, vertex)
+        vertex = bitset_next(suffix_vertices, vertex + 1)
+    
+    return best_solution_found
+
+
+cdef inline int _branch_adding_to_new_part(
+    binary_matrix_t graph,
+    int* part_of,
+    int* parts_rename,
+    int parts_used,
+    bitset_t prefix_vertices,
+    bitset_t suffix_vertices,
+    binary_matrix_t new_prefixes,
+    binary_matrix_t new_suffixes,
+    binary_matrix_t part_neighbors,
+    binary_matrix_t previous_part_neighbors,
+    binary_matrix_t parts_for_vertices,
+    bitset_t suffix_neighbors_of_vertex,
+    bitset_t suffix_neighbors_of_part,
+    dict seen_states,
+    int* seen_entries,
+    int max_prefix_length,
+    int max_seen_entries,
+    int lower_bound,
+    int upper_bound
+):
+    cdef int best_solution_found = -1
+    cdef int part = parts_used - 1
+    cdef int vertex = bitset_next(suffix_vertices, 0)
+    while vertex != -1:
+        _move(suffix_vertices, prefix_vertices, vertex)
+
+        current_solution = _branch_with_vertex_on_part(
+            vertex,
+            part,
+            graph,
+            part_of,
+            parts_rename,
+            parts_used,
+            prefix_vertices,
+            suffix_vertices,
+            new_prefixes,
+            new_suffixes,
+            part_neighbors,
+            previous_part_neighbors,
+            parts_for_vertices,
+            suffix_neighbors_of_vertex,
+            suffix_neighbors_of_part,
+            seen_states,
+            seen_entries,
+            max_prefix_length,
+            max_seen_entries,
+            lower_bound,
+            upper_bound
+        )
+
+        if current_solution != -1:
+            best_solution_found = current_solution
+            if best_solution_found <= lower_bound:
+                return best_solution_found
+            else:    
+                upper_bound = best_solution_found - 1
+        
+        _move(prefix_vertices, suffix_vertices, vertex)
+        vertex = bitset_next(suffix_vertices, vertex + 1)
 
     return best_solution_found
+
+
+cdef inline int _branch_with_vertex_on_part(
+    int vertex,
+    int part,
+    binary_matrix_t graph,
+    int* part_of,
+    int* parts_rename,
+    int parts_used,
+    bitset_t prefix_vertices,
+    bitset_t suffix_vertices,
+    binary_matrix_t new_prefixes,
+    binary_matrix_t new_suffixes,
+    binary_matrix_t part_neighbors,
+    binary_matrix_t previous_part_neighbors,
+    binary_matrix_t parts_for_vertices,
+    bitset_t suffix_neighbors_of_vertex,
+    bitset_t suffix_neighbors_of_part,
+    dict seen_states,
+    int* seen_entries,
+    int max_prefix_length,
+    int max_seen_entries,
+    int lower_bound,
+    int upper_bound
+):
+    part_of[vertex] = part
+
+    _update_part_neighbors(
+        part_neighbors.rows[part],
+        previous_part_neighbors.rows[vertex],
+        graph.rows[vertex]
+    )
+
+    cdef int solution = _branch_and_bound(
+        graph,
+        part_of,
+        parts_rename,
+        parts_used,
+        prefix_vertices,
+        suffix_vertices,
+        new_prefixes,
+        new_suffixes,
+        part_neighbors,
+        previous_part_neighbors,
+        parts_for_vertices,
+        suffix_neighbors_of_vertex,
+        suffix_neighbors_of_part,
+        seen_states,
+        seen_entries,
+        max_prefix_length,
+        max_seen_entries,
+        lower_bound,
+        upper_bound
+    )
+
+    _undo_update_part_neighbors(
+        part_neighbors.rows[part],
+        previous_part_neighbors.rows[vertex]
+    )
+
+    return solution
 
 
 cdef inline void _increment_prefix_greedily_on_existing_parts(
