@@ -1,9 +1,15 @@
+import itertools
+
 from sage.graphs.graph import Graph
 from sage.data_structures.bitset import Bitset
 from sage.data_structures.binary_matrix cimport *
 from sage.graphs.base.static_dense_graph cimport dense_graph_init
 from cysignals.memory cimport check_malloc, sig_malloc, sig_free
 from cysignals.signals cimport sig_on, sig_off 
+from sage.graphs.graph_decompositions.vertex_separation import vertex_separation
+
+from thinness.consistent_solution import ConsistentSolution 
+from thinness.vertex_separation import solution_from_vertex_separation
 
 DEFAULT_MAX_PREFIX_LENGTH = 15
 DEFAULT_MAX_SEEN_ENTRIES = 1_000_000
@@ -12,35 +18,80 @@ DEFAULT_MAX_SEEN_ENTRIES = 1_000_000
 def calculate_thinness_with_branch_and_bound(
     graph: Graph, 
     lower_bound: int = 1, 
-    upper_bound: int = None, 
+    upper_bound: int = None,
+    certificate: bool = False, 
     max_prefix_length: int = DEFAULT_MAX_PREFIX_LENGTH, 
     max_seen_entries: int = DEFAULT_MAX_SEEN_ENTRIES
-) -> int:
+) -> ConsistentSolution | int:
     components = [graph.subgraph(component, immutable=False) for component in graph.connected_components()]
-    for component in components:
-        component.relabel()
-    return max(
+    relabellings = [component.relabel(return_map=True) for component in components]
+    solutions = [
         calculate_thinness_of_connected_graph(
             component, 
             lower_bound, 
-            upper_bound, 
+            upper_bound,
+            certificate, 
             max_prefix_length, 
             max_seen_entries
-        ) for component in components)
+        ) for component in components
+    ]
+
+    if certificate:
+        return _join_solutions(solutions, relabellings)
+    else:
+        return max(solutions)
+
+
+def _join_solutions(solutions: list[ConsistentSolution], relabellings: list[dict[int, int]]) -> ConsistentSolution:
+    order = _join_orders([solution.order for solution in solutions], relabellings)
+    partition = _join_partitions([solution.partition for solution in solutions], relabellings)
+    return ConsistentSolution(order, partition)
+
+
+def _join_orders(orders: list[list[int]], relabellings: list[dict[int, int]]) -> list[int]:
+    orders = [
+        [_original_label(vertex, relabellings[i]) for vertex in order]
+        for i, order in enumerate(orders)
+    ]
+    return list(itertools.chain.from_iterable(orders))
+
+
+def _join_partitions(partitions: list[list[set]], relabellings: list[dict[int, int]]) -> list[set]:
+    partitions = [
+        [set(_original_label(vertex, relabellings[i]) for vertex in part) for part in partition]
+        for i, partition in enumerate(partitions)
+    ]
+    return [
+        set(itertools.chain.from_iterable(parts))
+        for parts in itertools.zip_longest(*partitions, fillvalue=set())
+    ]
+
+
+def _original_label(vertex: int, relabelling: dict[int, int]) -> int:
+    return next(key for key, value in relabelling.items() if value == vertex)
 
 
 def calculate_thinness_of_connected_graph(
     graph: Graph, 
     lower_bound: int = 1, 
-    upper_bound: int = None, 
+    upper_bound: int = None,
+    certificate: bool = False,
     max_prefix_length: int = DEFAULT_MAX_PREFIX_LENGTH, 
     max_seen_entries: int = DEFAULT_MAX_SEEN_ENTRIES
-) -> int:
+) -> ConsistentSolution | int:
     """upper_bound is exclusive."""
-    if upper_bound is None:
-        upper_bound = max(graph.pathwidth(), 1)
-    if upper_bound == 1:
-        return 1
+    vertex_separation_value, vertex_separation_order = vertex_separation(graph)
+    upper_bound_from_vertex_separation = max(vertex_separation_value, 1)
+    if upper_bound_from_vertex_separation <= lower_bound:
+        if certificate:
+            return solution_from_vertex_separation(graph, vertex_separation_order)
+        else:
+            return upper_bound_from_vertex_separation
+    upper_bound = (
+        upper_bound_from_vertex_separation
+        if upper_bound is None
+        else min(upper_bound, upper_bound_from_vertex_separation)
+    )
 
     cdef int max_branch_and_bound_thinness = upper_bound - 1
 
@@ -59,6 +110,7 @@ def calculate_thinness_of_connected_graph(
     cdef binary_matrix_t new_suffixes
     binary_matrix_init(new_suffixes, n, n)
     
+    cdef int* prefix = <int*>sig_malloc(sizeof(int) * n)
     cdef int* part_of = <int*>sig_malloc(sizeof(int) * n)
     cdef int* parts_rename = <int*>sig_malloc(sizeof(int) * max_branch_and_bound_thinness)
 
@@ -81,10 +133,14 @@ def calculate_thinness_of_connected_graph(
 
     cdef int seen_entries = 0
 
+    cdef int* best_order = <int*>sig_malloc(sizeof(int) * n)
+    cdef int* best_partition = <int*>sig_malloc(sizeof(int) * n)
+
     try:
         sig_on()
         branch_and_bound_thinness = _branch_and_bound(
             graph=adjacency_matrix,
+            prefix=prefix,
             part_of=part_of,
             parts_rename=parts_rename,
             parts_used=0,
@@ -100,6 +156,8 @@ def calculate_thinness_of_connected_graph(
             seen_entries=&seen_entries,
             lower_bound=lower_bound,
             upper_bound=max_branch_and_bound_thinness,
+            best_order=best_order,
+            best_partition=best_partition,
             max_prefix_length=max_prefix_length,
             max_seen_entries=max_seen_entries,
         )
@@ -109,6 +167,7 @@ def calculate_thinness_of_connected_graph(
         bitset_free(prefix_vertices)
         bitset_free(suffix_vertices)
         binary_matrix_free(new_suffixes)
+        sig_free(prefix)
         sig_free(part_of)
         sig_free(parts_rename)
         binary_matrix_free(part_neighbors)
@@ -117,11 +176,30 @@ def calculate_thinness_of_connected_graph(
         bitset_free(suffix_neighbors_of_vertex)
         bitset_free(suffix_neighbors_of_part)
 
-    return branch_and_bound_thinness if branch_and_bound_thinness != -1 else upper_bound
+    cdef int thinness = branch_and_bound_thinness if branch_and_bound_thinness != -1 else upper_bound
+    cdef list order
+    cdef list partition
+    if certificate:
+        if branch_and_bound_thinness == -1:
+            ret = solution_from_vertex_separation(graph, vertex_separation_order)
+        else:    
+            order = [best_order[i] for i in range(n)]
+            partition = [set() for _ in range(thinness)]
+            for vertex in range(n):
+                partition[best_partition[vertex]].add(vertex)
+            ret = ConsistentSolution(order, partition)
+    else:
+        ret = thinness
+
+    sig_free(best_order)
+    sig_free(best_partition)
+
+    return ret
 
 
 cdef int _branch_and_bound(
     binary_matrix_t graph,
+    int* prefix,
     int* part_of,
     int* parts_rename,
     int parts_used,
@@ -137,10 +215,12 @@ cdef int _branch_and_bound(
     int* seen_entries,
     int lower_bound,
     int upper_bound,
+    int* best_order,
+    int* best_partition,
     int max_prefix_length,
     int max_seen_entries,
 ):
-    cdef int level = suffix_vertices.size - bitset_len(suffix_vertices)
+    cdef int level = _get_level(suffix_vertices)
   
     cdef bitset_t new_suffix = new_suffixes.rows[level]
     bitset_copy(new_suffix, suffix_vertices)
@@ -149,6 +229,7 @@ cdef int _branch_and_bound(
         graph,
         new_suffix,
         parts_used,
+        prefix,
         part_of,
         part_neighbors,
         suffix_neighbors_of_vertex,
@@ -156,6 +237,8 @@ cdef int _branch_and_bound(
     )
 
     if bitset_isempty(new_suffix) and parts_used <= upper_bound:
+        _copy_array(graph.n_cols, prefix, best_order)
+        _copy_array(graph.n_cols, part_of, best_partition)
         return parts_used
 
     if _check_state_seen(
@@ -173,6 +256,7 @@ cdef int _branch_and_bound(
     
     cdef int best_solution_found = _branch_adding_to_existing_part(
         graph,
+        prefix,
         part_of,
         parts_rename,
         parts_used,
@@ -188,6 +272,8 @@ cdef int _branch_and_bound(
         seen_entries,
         lower_bound,
         upper_bound,
+        best_order,
+        best_partition,
         max_prefix_length,
         max_seen_entries,
     )
@@ -206,6 +292,7 @@ cdef int _branch_and_bound(
             new_suffix,
             suffix_neighbors_of_vertex,
             suffix_neighbors_of_part,
+            prefix,
             part_of,
             part_neighbors,
         )
@@ -213,6 +300,7 @@ cdef int _branch_and_bound(
         if vertex_added_on_new_part:
             new_part_solution = _branch_and_bound(
                 graph,
+                prefix,
                 part_of,
                 parts_rename,
                 parts_used,
@@ -228,12 +316,15 @@ cdef int _branch_and_bound(
                 seen_entries,
                 lower_bound,
                 upper_bound,
+                best_order,
+                best_partition,
                 max_prefix_length,
                 max_seen_entries,
             )
         else:
             new_part_solution = _branch_adding_to_new_part(
                 graph,
+                prefix,
                 part_of,
                 parts_rename,
                 parts_used,
@@ -249,6 +340,8 @@ cdef int _branch_and_bound(
                 seen_entries,
                 lower_bound,
                 upper_bound,
+                best_order,
+                best_partition,
                 max_prefix_length,
                 max_seen_entries,
             )
@@ -259,8 +352,18 @@ cdef int _branch_and_bound(
     return best_solution_found
 
 
+cdef inline int _get_level(bitset_t suffix_vertices):
+    return suffix_vertices.size - bitset_len(suffix_vertices)
+
+
+cdef inline void _copy_array(int n, int* array_from, int* array_to):
+    for i in range(n):
+        array_to[i] = array_from[i]
+
+
 cdef inline int _branch_adding_to_existing_part(
     binary_matrix_t graph,
+    int* prefix,
     int* part_of,
     int* parts_rename,
     int parts_used,
@@ -276,15 +379,19 @@ cdef inline int _branch_adding_to_existing_part(
     int* seen_entries,
     int lower_bound,
     int upper_bound,
+    int* best_order,
+    int* best_partition,
     int max_prefix_length,
     int max_seen_entries,
 ):
+    cdef int level = _get_level(suffix_vertices)
     cdef int best_solution_found = -1
     cdef bitset_t parts_for_vertex
     cdef int part
     cdef int vertex = bitset_next(suffix_vertices, 0)
     while vertex != -1:
         bitset_discard(suffix_vertices, vertex)
+        prefix[level] = vertex
 
         parts_for_vertex = _get_available_parts_for_vertex(
             vertex, 
@@ -303,6 +410,7 @@ cdef inline int _branch_adding_to_existing_part(
                 vertex,
                 part,
                 graph,
+                prefix,
                 part_of,
                 parts_rename,
                 parts_used,
@@ -318,6 +426,8 @@ cdef inline int _branch_adding_to_existing_part(
                 seen_entries,
                 lower_bound,
                 upper_bound,
+                best_order,
+                best_partition,
                 max_prefix_length,
                 max_seen_entries,
             )
@@ -339,6 +449,7 @@ cdef inline int _branch_adding_to_existing_part(
 
 cdef inline int _branch_adding_to_new_part(
     binary_matrix_t graph,
+    int* prefix,
     int* part_of,
     int* parts_rename,
     int parts_used,
@@ -354,19 +465,24 @@ cdef inline int _branch_adding_to_new_part(
     int* seen_entries,
     int lower_bound,
     int upper_bound,
+    int* best_order,
+    int* best_partition,
     int max_prefix_length,
     int max_seen_entries,
 ):
+    cdef int level = _get_level(suffix_vertices)
     cdef int best_solution_found = -1
     cdef int part = parts_used - 1
     cdef int vertex = bitset_next(suffix_vertices, 0)
     while vertex != -1:
         bitset_discard(suffix_vertices, vertex)
+        prefix[level] = vertex
 
         current_solution = _branch_with_vertex_on_part(
             vertex,
             part,
             graph,
+            prefix,
             part_of,
             parts_rename,
             parts_used,
@@ -382,6 +498,8 @@ cdef inline int _branch_adding_to_new_part(
             seen_entries,
             lower_bound,
             upper_bound,
+            best_order,
+            best_partition,
             max_prefix_length,
             max_seen_entries,
         )
@@ -403,6 +521,7 @@ cdef inline int _branch_with_vertex_on_part(
     int vertex,
     int part,
     binary_matrix_t graph,
+    int* prefix,
     int* part_of,
     int* parts_rename,
     int parts_used,
@@ -418,6 +537,8 @@ cdef inline int _branch_with_vertex_on_part(
     int* seen_entries,
     int lower_bound,
     int upper_bound,
+    int* best_order,
+    int* best_partition,
     int max_prefix_length,
     int max_seen_entries,
 ):
@@ -431,6 +552,7 @@ cdef inline int _branch_with_vertex_on_part(
 
     cdef int solution = _branch_and_bound(
         graph,
+        prefix,
         part_of,
         parts_rename,
         parts_used,
@@ -446,6 +568,8 @@ cdef inline int _branch_with_vertex_on_part(
         seen_entries,
         lower_bound,
         upper_bound,
+        best_order,
+        best_partition,
         max_prefix_length,
         max_seen_entries,
     )
@@ -462,12 +586,14 @@ cdef inline void _increment_prefix_greedily_on_existing_parts(
     binary_matrix_t graph,
     bitset_t suffix_vertices,
     int parts_used,
+    int* prefix,
     int* part_of,
     binary_matrix_t part_neighbors,
     bitset_t suffix_neighbors_of_vertex,
     bitset_t suffix_neighbors_of_part,
 ):
     """Add to prefix all vertices that have the same suffix neighbors as one of the parts."""
+    cdef int level = _get_level(suffix_vertices)
     cdef int vertex
     cdef int part
     cdef bint suffix_changed = True
@@ -488,7 +614,9 @@ cdef inline void _increment_prefix_greedily_on_existing_parts(
             )
 
             if part != -1:
+                prefix[level] = vertex
                 part_of[vertex] = part
+                level += 1
                 suffix_changed = True
             else:
                 bitset_add(suffix_vertices, vertex)
@@ -503,9 +631,11 @@ cdef inline bint _add_vertex_to_prefix_greedily_on_part(
     bitset_t suffix_vertices,
     bitset_t suffix_neighbors_of_vertex,
     bitset_t suffix_neighbors_of_part,
+    int* prefix,
     int* part_of,
     binary_matrix_t part_neighbors,
 ):
+    cdef int level = _get_level(suffix_vertices)
     cdef bint can_be_added
     cdef int vertex = bitset_next(suffix_vertices, 0)
     while vertex != -1:
@@ -525,6 +655,7 @@ cdef inline bint _add_vertex_to_prefix_greedily_on_part(
         )
 
         if can_be_added:
+            prefix[level] = vertex
             part_of[vertex] = part
             return True
 
