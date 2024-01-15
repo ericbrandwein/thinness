@@ -102,10 +102,10 @@ def calculate_thinness_of_connected_graph(
             suffix_neighbors_of_part=suffix_neighbors_of_part,
             seen_states=seen_states,
             seen_entries=&seen_entries,
+            lower_bound=lower_bound,
+            upper_bound=max_branch_and_bound_thinness,
             max_prefix_length=max_prefix_length,
             max_seen_entries=max_seen_entries,
-            lower_bound=lower_bound,
-            upper_bound=max_branch_and_bound_thinness
         )
         sig_off()
     finally:
@@ -141,10 +141,10 @@ cdef int _branch_and_bound(
     bitset_t suffix_neighbors_of_part,
     dict seen_states,
     int* seen_entries,
+    int lower_bound,
+    int upper_bound,
     int max_prefix_length,
     int max_seen_entries,
-    int lower_bound,
-    int upper_bound
 ):
     cdef int level = bitset_len(prefix_vertices)
     cdef bitset_t new_prefix = new_prefixes.rows[level]
@@ -196,10 +196,10 @@ cdef int _branch_and_bound(
         suffix_neighbors_of_part,
         seen_states,
         seen_entries,
+        lower_bound,
+        upper_bound,
         max_prefix_length,
         max_seen_entries,
-        lower_bound,
-        upper_bound
     )
     
     cdef int new_part_solution
@@ -237,10 +237,10 @@ cdef int _branch_and_bound(
                 suffix_neighbors_of_part,
                 seen_states,
                 seen_entries,
+                lower_bound,
+                upper_bound,
                 max_prefix_length,
                 max_seen_entries,
-                lower_bound,
-                upper_bound
             )
         else:
             new_part_solution = _branch_adding_to_new_part(
@@ -259,10 +259,10 @@ cdef int _branch_and_bound(
                 suffix_neighbors_of_part,
                 seen_states,
                 seen_entries,
+                lower_bound,
+                upper_bound,
                 max_prefix_length,
                 max_seen_entries,
-                lower_bound,
-                upper_bound
             )
 
         if new_part_solution != -1:
@@ -287,10 +287,10 @@ cdef inline int _branch_adding_to_existing_part(
     bitset_t suffix_neighbors_of_part,
     dict seen_states,
     int* seen_entries,
+    int lower_bound,
+    int upper_bound,
     int max_prefix_length,
     int max_seen_entries,
-    int lower_bound,
-    int upper_bound
 ):
     cdef int best_solution_found = -1
     cdef bitset_t parts_for_vertex
@@ -330,10 +330,10 @@ cdef inline int _branch_adding_to_existing_part(
                 suffix_neighbors_of_part,
                 seen_states,
                 seen_entries,
+                lower_bound,
+                upper_bound,
                 max_prefix_length,
                 max_seen_entries,
-                lower_bound,
-                upper_bound
             )
 
             if current_solution != -1:
@@ -367,10 +367,10 @@ cdef inline int _branch_adding_to_new_part(
     bitset_t suffix_neighbors_of_part,
     dict seen_states,
     int* seen_entries,
+    int lower_bound,
+    int upper_bound,
     int max_prefix_length,
     int max_seen_entries,
-    int lower_bound,
-    int upper_bound
 ):
     cdef int best_solution_found = -1
     cdef int part = parts_used - 1
@@ -396,10 +396,10 @@ cdef inline int _branch_adding_to_new_part(
             suffix_neighbors_of_part,
             seen_states,
             seen_entries,
+            lower_bound,
+            upper_bound,
             max_prefix_length,
             max_seen_entries,
-            lower_bound,
-            upper_bound
         )
 
         if current_solution != -1:
@@ -433,10 +433,10 @@ cdef inline int _branch_with_vertex_on_part(
     bitset_t suffix_neighbors_of_part,
     dict seen_states,
     int* seen_entries,
+    int lower_bound,
+    int upper_bound,
     int max_prefix_length,
     int max_seen_entries,
-    int lower_bound,
-    int upper_bound
 ):
     part_of[vertex] = part
 
@@ -462,10 +462,10 @@ cdef inline int _branch_with_vertex_on_part(
         suffix_neighbors_of_part,
         seen_states,
         seen_entries,
+        lower_bound,
+        upper_bound,
         max_prefix_length,
         max_seen_entries,
-        lower_bound,
-        upper_bound
     )
 
     _undo_update_part_neighbors(
