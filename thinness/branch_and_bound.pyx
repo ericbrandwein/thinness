@@ -108,7 +108,7 @@ def calculate_thinness_of_connected_graph(
     bitset_complement(suffix_vertices, suffix_vertices)
 
     cdef binary_matrix_t new_suffixes
-    binary_matrix_init(new_suffixes, n, n)
+    binary_matrix_init(new_suffixes, n+1, n)
     
     cdef int* prefix = <int*>sig_malloc(sizeof(int) * n)
     cdef int* part_of = <int*>sig_malloc(sizeof(int) * n)

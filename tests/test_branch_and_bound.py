@@ -32,6 +32,10 @@ class TestBranchAndBound(unittest.TestCase):
     def test_thinness_of_cycle(self):
         self._assert_thinness_of_graph(graphs.CycleGraph(4), 2)
 
+    def test_graph_that_segfaults(self):
+        graph = Graph(r'J?AADI\x\z_')
+        calculate_thinness_with_branch_and_bound(graph)
+
     def test_thinness_of_random_graphs(self):
         set_random_seed(0)
         n = 8
