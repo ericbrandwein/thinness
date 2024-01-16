@@ -3,7 +3,7 @@ import itertools
 from sage.graphs.graph import Graph 
 
 
-def reduce_graph(graph: Graph) -> Graph:
+def reduce_graph(graph: Graph) -> tuple[Graph, int]:
     """Reduce the graph to a smaller graph with the same thinness."""
     reduced_graph = _remove_same_closed_neighborhood_vertices(graph)
     reduced_graph = _remove_same_open_neighborhood_vertices(reduced_graph)
