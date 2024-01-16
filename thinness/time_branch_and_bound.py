@@ -26,17 +26,16 @@ def thinness_of_chordal_graphs(n):
         calculate_thinness_with_branch_and_bound(graph, max_seen_entries=1_600_000)
 
 
-if __name__ == '__main__':
-    set_random_seed(0)
-    print("Crown graphs:")
+def time_crown_graphs():
     for n in range(2, 12):
         graph = crown_graph(n)
         print(textwrap.indent(
-            text=f'{n}:\t{timeit.timeit("calculate_thinness_with_branch_and_bound(graph, max_seen_entries=1_600_000)", globals=globals(), number=1)}',
+            text=f'{n}:\t{timeit.timeit("calculate_thinness_with_branch_and_bound(graph, max_seen_entries=1_600_000)", globals={**globals(), **locals()}, number=1)}',
             prefix='  '
         ))
-    set_random_seed(0)
-    print("Random GNM graphs:")
+
+
+def time_random_graphs():
     for n in range(10, 20):
         print(textwrap.indent(text=f'{n}:', prefix='  '))
         for density in [0.2, 0.5, 0.8]:
@@ -45,11 +44,34 @@ if __name__ == '__main__':
             for _ in range(10):
                 graph = graphs.RandomGNM(n, m)
                 times.append(
-                    timeit.timeit("calculate_thinness_with_branch_and_bound(graph, max_seen_entries=1_600_000)", globals=globals(), number=1)
+                    timeit.timeit("calculate_thinness_with_branch_and_bound(graph, max_seen_entries=1_600_000)", globals={**globals(), **locals()}, number=1)
                 )
             print(textwrap.indent(
                 text=f'density {density}: {sum(times)/len(times)}',
                 prefix='    '
             ))
 
+
+def time_complement_of_nK2():
+    for n in range(1, 14):
+        graph = (graphs.CompleteGraph(2) * n).complement()
+        print(textwrap.indent(
+            text=f'{n}:\t{timeit.timeit("calculate_thinness_with_branch_and_bound(graph, max_seen_entries=1_600_000)", globals={**globals(), **locals()}, number=1)}',
+            prefix='  '
+        ))
+
+
+if __name__ == '__main__':
+    set_random_seed(0)
+    print("Crown graphs:")
+    time_crown_graphs()
+
+    set_random_seed(0)
+    print("Random GNM graphs:")
+    time_random_graphs()
+
+    set_random_seed(0)
+    print("Complement of n*K2 graphs:")
+    time_complement_of_nK2()
+    
     
