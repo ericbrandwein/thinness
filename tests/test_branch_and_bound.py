@@ -1,4 +1,5 @@
 import unittest
+import itertools
 
 from sage.graphs.graph import Graph
 from sage.graphs.graph_generators import graphs
@@ -36,6 +37,20 @@ class TestBranchAndBound(unittest.TestCase):
         graph = Graph(r'J?AADI\x\z_')
         calculate_thinness_with_branch_and_bound(graph)
 
+    def test_crown_graphs(self):
+        for n in range(2, 10):
+            graph = crown_graph(n)
+            thinness = n - 1
+            with self.subTest(graph=graph.graph6_string()):
+                self._assert_thinness_of_graph(graph, thinness)
+
+    def test_complement_of_nK2(self):
+        for n in range(1, 10):
+            graph = (graphs.CompleteGraph(2) * n).complement()
+            thinness = n
+            with self.subTest(graph=graph.graph6_string()):
+                self._assert_thinness_of_graph(graph, thinness)
+
     def test_thinness_of_random_graphs(self):
         set_random_seed(0)
         n = 8
@@ -45,4 +60,10 @@ class TestBranchAndBound(unittest.TestCase):
             thinness = solver.solve(graph).thinness
             with self.subTest(graph=graph.graph6_string()):
                 self._assert_thinness_of_graph(graph, thinness)
-            
+
+
+def crown_graph(vertices_per_side: int) -> Graph:
+    graph = Graph(2*vertices_per_side)
+    for u, v in itertools.permutations(range(vertices_per_side), 2):
+        graph.add_edge(u, v + vertices_per_side)
+    return graph
