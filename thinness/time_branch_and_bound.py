@@ -1,6 +1,6 @@
-import timeit
 import itertools
 import textwrap
+from linetimer import CodeTimer
 
 from sage.graphs.graph_generators import graphs
 from sage.graphs.graph import Graph
@@ -27,10 +27,10 @@ def thinness_of_chordal_graphs(n):
 
 
 def time_crown_graphs():
-    for n in range(2, 12):
+    for n in range(2, 20):
         graph = crown_graph(n)
         print(textwrap.indent(
-            text=f'{n}:\t{timeit.timeit("calculate_thinness_with_branch_and_bound(graph, max_seen_entries=1_600_000)", globals={**globals(), **locals()}, number=1)}',
+            text=f'{n}:\t{time_calculation(graph)}',
             prefix='  '
         ))
 
@@ -43,9 +43,7 @@ def time_random_graphs():
             times = []
             for _ in range(10):
                 graph = graphs.RandomGNM(n, m)
-                times.append(
-                    timeit.timeit("calculate_thinness_with_branch_and_bound(graph, max_seen_entries=1_600_000)", globals={**globals(), **locals()}, number=1)
-                )
+                times.append(time_calculation(graph))
             print(textwrap.indent(
                 text=f'density {density}: {sum(times)/len(times)}',
                 prefix='    '
@@ -55,14 +53,34 @@ def time_random_graphs():
 def time_complement_of_nK2():
     for n in range(1, 14):
         graph = (graphs.CompleteGraph(2) * n).complement()
+        code_timer = CodeTimer(silent=True)
+        with code_timer:
+            calculate_thinness_with_branch_and_bound(graph, max_seen_entries=1_600_000)
         print(textwrap.indent(
-            text=f'{n}:\t{timeit.timeit("calculate_thinness_with_branch_and_bound(graph, max_seen_entries=1_600_000)", globals={**globals(), **locals()}, number=1)}',
+            text=f'{n}:\t{time_calculation(graph)}',
             prefix='  '
         ))
 
 
+def time_grid_graphs():
+    for rows in range(2, 9):
+        for cols in range(2, rows + 1):
+            graph = graphs.Grid2dGraph(rows, cols)
+            time = time_calculation(graph)
+            print(textwrap.indent(
+                text=f'{rows}x{cols}:\t{time}',
+                prefix='  '
+            ))
+
+
+def time_calculation(graph: Graph):
+    code_timer = CodeTimer(silent=True)
+    with code_timer:
+        calculate_thinness_with_branch_and_bound(graph, max_seen_entries=1_600_000)
+    return code_timer.took / 1000
+
+
 if __name__ == '__main__':
-    set_random_seed(0)
     print("Crown graphs:")
     time_crown_graphs()
 
@@ -70,8 +88,9 @@ if __name__ == '__main__':
     print("Random GNM graphs:")
     time_random_graphs()
 
-    set_random_seed(0)
     print("Complement of n*K2 graphs:")
     time_complement_of_nK2()
-    
+
+    print("Grid graphs:")
+    time_grid_graphs()
     
