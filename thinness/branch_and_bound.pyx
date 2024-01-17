@@ -136,7 +136,7 @@ def calculate_thinness_of_connected_graph(
     cdef int* best_order = <int*>sig_malloc(sizeof(int) * n)
     cdef int* best_partition = <int*>sig_malloc(sizeof(int) * n)
 
-    cdef int* canonical_vertices = _build_canonical_vertices(graph)
+    cdef list canonical_vertices = _build_canonical_vertices(graph)
 
     try:
         sig_on()
@@ -178,7 +178,6 @@ def calculate_thinness_of_connected_graph(
         binary_matrix_free(parts_for_vertices)
         bitset_free(suffix_neighbors_of_vertex)
         bitset_free(suffix_neighbors_of_part)
-        sig_free(canonical_vertices)
 
     cdef int thinness = branch_and_bound_thinness if branch_and_bound_thinness != -1 else upper_bound
     cdef list order
@@ -201,14 +200,11 @@ def calculate_thinness_of_connected_graph(
     return ret
 
 
-cdef inline int* _build_canonical_vertices(graph: Graph):
-    cdef int* canonical_vertices = <int*>sig_malloc(sizeof(int) * graph.order())
-    cdef list orbits = graph.automorphism_group(orbits=True, return_group=False)
-    for orbit in orbits:
-        canonical_vertex = orbit[0]
-        for vertex in orbit:
-            canonical_vertices[vertex] = canonical_vertex
-    return canonical_vertices
+cdef inline list _build_canonical_vertices(graph: Graph):
+    return [
+        orbit[0] for orbit in
+        graph.automorphism_group(orbits=True, return_group=False)
+    ]
 
 
 cdef int _branch_and_bound(
@@ -227,7 +223,7 @@ cdef int _branch_and_bound(
     bitset_t suffix_neighbors_of_part,
     dict seen_states,
     int* seen_entries,
-    int* canonical_vertices,
+    list canonical_vertices,
     int lower_bound,
     int upper_bound,
     int* best_order,
@@ -396,7 +392,7 @@ cdef inline int _branch_adding_to_existing_part(
     bitset_t suffix_neighbors_of_part,
     dict seen_states,
     int* seen_entries,
-    int* canonical_vertices,
+    list canonical_vertices,
     int lower_bound,
     int upper_bound,
     int* best_order,
@@ -484,7 +480,7 @@ cdef inline int _branch_adding_to_new_part(
     bitset_t suffix_neighbors_of_part,
     dict seen_states,
     int* seen_entries,
-    int* canonical_vertices,
+    list canonical_vertices,
     int lower_bound,
     int upper_bound,
     int* best_order,
@@ -495,8 +491,9 @@ cdef inline int _branch_adding_to_new_part(
     cdef int level = _get_level(suffix_vertices)
     cdef int best_solution_found = -1
     cdef int part = parts_used - 1
-    cdef int vertex = bitset_next(suffix_vertices, 0)
-    while vertex != -1:
+    cdef list vertices = canonical_vertices if level == 0 else bitset_list(suffix_vertices)
+    cdef int vertex
+    for vertex in vertices:
         bitset_discard(suffix_vertices, vertex)
         prefix[level] = vertex
 
@@ -535,7 +532,6 @@ cdef inline int _branch_adding_to_new_part(
                 upper_bound = best_solution_found - 1
         
         bitset_add(suffix_vertices, vertex)
-        vertex = bitset_next(suffix_vertices, vertex + 1)
 
     return best_solution_found
 
@@ -558,7 +554,7 @@ cdef inline int _branch_with_vertex_on_part(
     bitset_t suffix_neighbors_of_part,
     dict seen_states,
     int* seen_entries,
-    int* canonical_vertices,
+    list canonical_vertices,
     int lower_bound,
     int upper_bound,
     int* best_order,
@@ -734,7 +730,7 @@ cdef inline bint _is_greedy_part_for_vertex(
 cdef inline bint _check_state_seen(
     dict seen_states,
     int* seen_entries,
-    int* canonical_vertices,
+    list canonical_vertices,
     bitset_t prefix_vertices,
     bitset_t suffix_vertices,
     int parts_used,
@@ -748,18 +744,18 @@ cdef inline bint _check_state_seen(
     if prefix_len > max_prefix_length:
         return False
 
-    cdef int vertex
-    cdef frozenset frozen_prefix_vertices
-    if prefix_len == 1:
-        vertex = bitset_next(prefix_vertices, 0)
-        frozen_prefix_vertices = frozenset([canonical_vertices[vertex]])
-        if frozen_prefix_vertices in seen_states:
-            return True
-        else:
-            seen_states[frozen_prefix_vertices] = {}
-            return False
+    # cdef int vertex
+    # cdef frozenset frozen_prefix_vertices
+    # if prefix_len == 1:
+    #     vertex = bitset_next(prefix_vertices, 0)
+    #     frozen_prefix_vertices = frozenset([canonical_vertices[vertex]])
+    #     if frozen_prefix_vertices in seen_states:
+    #         return True
+    #     else:
+    #         seen_states[frozen_prefix_vertices] = {}
+    #         return False
 
-    frozen_prefix_vertices = frozenset(bitset_list(prefix_vertices))
+    cdef frozenset frozen_prefix_vertices = frozenset(bitset_list(prefix_vertices))
     cdef frozenset frozen_part_neighbors = _build_frozen_part_neighbors(
         suffix_vertices, parts_used, part_neighbors, suffix_neighbors_of_part)
     cdef dict seen_part_neighbors
