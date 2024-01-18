@@ -53,9 +53,6 @@ def time_random_graphs():
 def time_complement_of_nK2():
     for n in range(1, 14):
         graph = (graphs.CompleteGraph(2) * n).complement()
-        code_timer = CodeTimer(silent=True)
-        with code_timer:
-            calculate_thinness_with_branch_and_bound(graph, max_seen_entries=1_600_000)
         print(textwrap.indent(
             text=f'{n}:\t{time_calculation(graph)}',
             prefix='  '
@@ -76,7 +73,7 @@ def time_grid_graphs():
 def time_calculation(graph: Graph):
     code_timer = CodeTimer(silent=True)
     with code_timer:
-        calculate_thinness_with_branch_and_bound(graph, max_seen_entries=1_600_000)
+        calculate_thinness_with_branch_and_bound(graph, max_seen_entries=1_600_000, max_prefix_length=20)
     return code_timer.took / 1000
 
 
