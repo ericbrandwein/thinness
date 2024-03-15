@@ -298,6 +298,12 @@ cdef int _branch_and_bound(
         max_seen_entries,
     )
     
+    if best_solution_found != -1:
+        if best_solution_found <= lower_bound:
+            return best_solution_found
+        else:
+            upper_bound = best_solution_found - 1
+    
     cdef int new_part_solution
     cdef int part
     cdef int vertex_added_on_new_part
