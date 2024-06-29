@@ -5,16 +5,16 @@ from sage.graphs.graph import Graph
 from sage.graphs.graph_generators import graphs
 from sage.misc.randstate import set_random_seed
 
-from thinness.branch_and_bound import calculate_thinness_with_branch_and_bound
+from thinness.branch_and_bound import calculate_thinness
 from thinness.z3 import Z3ThinnessSolver
 from thinness.verify import verify_solution
 
 
 class TestBranchAndBound(unittest.TestCase):
     def _assert_thinness_of_graph(self, graph: Graph, expected_thinness: int):
-        actual_thinness = calculate_thinness_with_branch_and_bound(graph)
+        actual_thinness = calculate_thinness(graph)
         self.assertEqual(actual_thinness, expected_thinness)
-        solution = calculate_thinness_with_branch_and_bound(graph, certificate=True)
+        solution = calculate_thinness(graph, certificate=True)
         self.assertEqual(solution.thinness, expected_thinness)
         self.assertTrue(verify_solution(graph, solution))
 
@@ -35,7 +35,7 @@ class TestBranchAndBound(unittest.TestCase):
 
     def test_graph_that_segfaults(self):
         graph = Graph(r'J?AADI\x\z_')
-        calculate_thinness_with_branch_and_bound(graph)
+        calculate_thinness(graph)
 
     def test_crown_graphs(self):
         for n in range(2, 10):

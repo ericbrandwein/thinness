@@ -2,7 +2,7 @@ from sage.misc.randstate import set_random_seed
 from sage.graphs.graph_generators import graphs
 
 import pyximport; pyximport.install()
-from thinness.branch_and_bound import calculate_thinness_with_branch_and_bound
+from thinness.branch_and_bound import calculate_thinness
 
 
 def profile():
@@ -10,7 +10,7 @@ def profile():
     n = 10
     for _ in range(100):
         graph = graphs.RandomGNP(n, 0.5)
-        calculate_thinness_with_branch_and_bound(graph)
+        calculate_thinness(graph)
 
 
 profile()

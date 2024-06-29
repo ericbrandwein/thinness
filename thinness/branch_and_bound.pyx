@@ -15,7 +15,7 @@ DEFAULT_MAX_PREFIX_LENGTH = 15
 DEFAULT_MAX_SEEN_ENTRIES = 1_000_000
 
 
-def calculate_thinness_with_branch_and_bound(
+def calculate_thinness(
     graph: Graph, 
     lower_bound: int = 1, 
     upper_bound: int = None,
