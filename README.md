@@ -14,7 +14,7 @@ The B&B algorithm is much faster than the other one, but currently does not supp
 - pipenv
 
 ## Setting up the environment
-- Run `pipenv --site-packages --dev install`
+- Run `pipenv --site-packages install`
 - Run `pipenv run build` to compile the `.pyx` files
 
 Done! Now you can import the algorithms in any Python script in this directory. For example:
