@@ -7,25 +7,16 @@ from .helpers import *
 from .data import load_graphs_by_thinness, save_graph_with_thinness, get_last_processed_index, save_last_processed_index
 from .compatibility import build_compatibility_graph
 from .itertools_utils import skip_first
-
-import pyximport; pyximport.install()
-from .z3 import Z3ThinnessSolver
+from .branch_and_bound import calculate_thinness
 
 
-GRAPHS_WITH_N_10 = 11716571
-CHUNK_SIZE = 50
+GRAPHS_PER_ORDER = [1,1,1,2,6,21,112,853,11117,261080,11716571,1006700565,164059830476,50335907869219,29003487462848061,31397381142761241960,63969560113225176176277,245871831682084026519528568,1787331725248899088890200576580,24636021429399867655322650759681644]
+CHUNK_SIZE = 2000
 
 
-def init_process(number_of_vertices):
-    global solver
-    solver = Z3ThinnessSolver(number_of_vertices)
-
-
-def process_graph(params):
-    G, graphs_dict = params
-    solution = solver.solve(G)
-    is_minimal = solution.thinness > 1 and not has_induced_subgraph(G, graphs_dict[solution.thinness])
-    return G.graph6_string(), solution.thinness, is_minimal
+def process_graph(graph):
+    thinness = calculate_thinness(graph)
+    return graph.graph6_string(), thinness
 
 
 def estimate_time_remaining(start_time, graphs_processed, graphs_remaining):
@@ -34,12 +25,12 @@ def estimate_time_remaining(start_time, graphs_processed, graphs_remaining):
     return time_per_graph * graphs_remaining
 
 
-def print_updated_progress(index, last_skipped_graph, start_time):
+def print_updated_progress(n, index, start_time):
     if index % CHUNK_SIZE == 0:
-        graphs_processed = index - last_skipped_graph
-        graphs_remaining = GRAPHS_WITH_N_10 - index - 1
+        graphs_processed = index + 1
+        graphs_remaining = GRAPHS_PER_ORDER[n] - graphs_processed
         time_remaining = estimate_time_remaining(start_time, graphs_processed, graphs_remaining)
-        print(f'{index + 1:,} total graphs processed, {graphs_remaining:,} remaining. Time remaining: {time_remaining}', end='\r')
+        print(f'{graphs_processed:,} total graphs processed, {graphs_remaining:,} remaining. Time remaining: {time_remaining}', end='\r')
 
 
 def print_found_graph(graph6, thinness):
@@ -57,24 +48,18 @@ def skip_processed_graphs(graphs):
 
 
 def fill_csvs_paralelly(n=10):
-    graphs_dict = load_graphs_by_thinness(n-1)
-    graphs_dict.setdefault(int(n/2), [])
     graphs = connected_graphs_upto(n, start=n)
-    last_skipped_graph = skip_processed_graphs(graphs)
     
     start_time = datetime.today()
-    with mp.Pool(initializer=init_process, initargs=(n,)) as pool:
-        params = ((G, graphs_dict) for G in graphs)
-        process_map = pool.imap(process_graph, params, chunksize=CHUNK_SIZE)
-        for index, (graph6, thinness, is_minimal) in enumerate(process_map, start=last_skipped_graph + 1):
-            if is_minimal:
-                save_graph_with_thinness(graph6, thinness)
-                print_found_graph(graph6, thinness)
-            save_last_processed_index(index)
-            print_updated_progress(index, last_skipped_graph, start_time)
-
+    with mp.Pool() as pool:
+        process_map = pool.imap(process_graph, graphs, chunksize=CHUNK_SIZE)
+        for index, (graph6, thinness) in enumerate(process_map):
+            print_updated_progress(n, index, start_time)
+        
 
 def minimum_partition_for_vertex_order(graph: Graph, vertex_order: list[int]):
     compatibility_graph = build_compatibility_graph(graph, vertex_order)
     return compatibility_graph.coloring()
 
+if __name__ == '__main__':
+    fill_csvs_paralelly(n=12)

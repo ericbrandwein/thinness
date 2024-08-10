@@ -1,0 +1,9 @@
+  \begin{subfigure}[b]{0.3\linewidth}
+    \centering
+    \begin{tikzpicture}[every node/.style={circle, draw}, scale=0.9]
+      \def\n{5}
+      \draw (0, 0) grid (\n-1, \n-1);
+      \foreach[count=\i from 0] \x/\t in {#vertices}
+      \node[\t, fill=white] at ({Mod(\i, \n)}, {\n-1- int(\i/\n)}) {$\x$};
+    \end{tikzpicture}
+  \end{subfigure}
