@@ -1,7 +1,8 @@
 # cython: profile=True
 import itertools
 
-from sage.graphs.graph import Graph, DiGraph
+from sage.graphs.graph import Graph
+from sage.graphs.digraph import DiGraph
 
 from .compatibility import build_compatibility_graph
 from .consistent_solution import ConsistentSolution
