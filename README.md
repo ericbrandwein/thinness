@@ -9,8 +9,8 @@ Includes two exact algorithms:
 The B&B algorithm is much faster than the other one, but currently does not support calculating the proper thinness.
 
 ## Requirements
-- Python 3
-- SageMath
+- Python 3.10
+- SageMath >=10.0
 - pipenv
 
 ## Setting up the environment
