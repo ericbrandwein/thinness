@@ -27,5 +27,22 @@ for graph in graphs(8):
     print(graph.graph6_string(), calculate_thinness(graph))
 ```
 
+## Using Docker
+
+If you cannot install the dependencies for some reason (for example, Ubuntu doesn't have Sagemath 10.0 yet), you can use the provided Dockerfile to build a container with all the dependencies. You will need to have Docker installed.
+
+In the root directory of the project, run:
+
+```bash
+sudo docker build -t thinness_sage . # This can take a while
+```
+This will build the image with the name `thinness_sage`. You can then run the container with:
+
+```bash
+sudo docker run --mount type=bind,source=.,target=/thinness-sage -it thinness_sage
+```
+
+Once inside the container, run `pipenv run build` and done! You have a working environment where you can run your scripts.
+
 ## Classification of small graphs
 The minimal graphs for each thinness and proper thinness value for graphs with up to 10 vertices can be found in the CSV files in [data/](data/).
