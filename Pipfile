@@ -7,12 +7,13 @@ name = "pypi"
 z3-solver = "*"
 setuptools = "*"
 linetimer = "*"
+cython = "*"
 
 [dev-packages]
 snakeviz = "*"
 
 [requires]
-python_version = "3.10"
+python_version = "3"
 
 [scripts]
 test = "python -m unittest discover"
