@@ -29,7 +29,11 @@ for graph in graphs(8):
 
 ## Using Docker
 
-If you cannot install the dependencies for some reason (for example, Ubuntu doesn't have Sagemath 10.0 yet), you can use the provided Dockerfile to build a container with all the dependencies. You will need to have Docker installed.
+If you cannot install the dependencies for some reason (for example, Ubuntu doesn't have Sagemath 10.0 yet), you can use the provided Dockerfile to build a container with all the dependencies. You will need to have Docker and `docker-buildx` installed. In Debian/Ubuntu:
+
+```
+sudo apt install docker docker-buildx
+```
 
 In the root directory of the project, run:
 
