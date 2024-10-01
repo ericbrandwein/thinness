@@ -42,13 +42,13 @@ def calculate_thinness(
         return max(solutions)
 
 
-def _join_solutions(solutions: list[ConsistentSolution], relabellings: list[dict[int, int]]) -> ConsistentSolution:
+def _join_solutions(solutions: list[ConsistentSolution], relabellings: list[dict]) -> ConsistentSolution:
     order = _join_orders([solution.order for solution in solutions], relabellings)
     partition = _join_partitions([solution.partition for solution in solutions], relabellings)
     return ConsistentSolution(order, partition)
 
 
-def _join_orders(orders: list[list[int]], relabellings: list[dict[int, int]]) -> list[int]:
+def _join_orders(orders: list[list[int]], relabellings: list[dict]) -> list[int]:
     orders = [
         [_original_label(vertex, relabellings[i]) for vertex in order]
         for i, order in enumerate(orders)
@@ -56,7 +56,7 @@ def _join_orders(orders: list[list[int]], relabellings: list[dict[int, int]]) ->
     return list(itertools.chain.from_iterable(orders))
 
 
-def _join_partitions(partitions: list[list[set]], relabellings: list[dict[int, int]]) -> list[set]:
+def _join_partitions(partitions: list[list[set]], relabellings: list[dict]) -> list[set]:
     partitions = [
         [set(_original_label(vertex, relabellings[i]) for vertex in part) for part in partition]
         for i, partition in enumerate(partitions)
@@ -67,7 +67,7 @@ def _join_partitions(partitions: list[list[set]], relabellings: list[dict[int, i
     ]
 
 
-def _original_label(vertex: int, relabelling: dict[int, int]) -> int:
+def _original_label(vertex: int, relabelling: dict):
     return next(key for key, value in relabelling.items() if value == vertex)
 
 
