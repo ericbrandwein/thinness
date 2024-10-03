@@ -18,4 +18,4 @@ def plot_solution(graph, solution):
         element: index
         for index, element in enumerate(solution.order)
     })
-    graph.plot(partition=_partition_by_order(solution)).save('graph.png')
+    graph.plot(partition=_partition_by_order(solution)).save('solution.png')
