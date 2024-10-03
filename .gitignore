@@ -7,3 +7,4 @@ data/last-processed.index
 src/build/
 *.so
 *.c
+*.png
