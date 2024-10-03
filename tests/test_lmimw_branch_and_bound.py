@@ -33,3 +33,17 @@ class TestLmimwBranchAndBound(unittest.TestCase):
         lmimw, order = lmimwidth(graph, certificate=True)
         self.assertEqual(lmimw, 1)
         self.assertEqual(order, [0, 2, 1, 3])
+
+    def test_lmimw_of_cycle_5(self):
+        graph = graphs.CycleGraph(5)
+        self.assertEqual(lmimwidth(graph), 2)
+
+    def test_lmimw_of_grids(self):
+        graph = graphs.Grid2dGraph(2, 2)
+        self.assertEqual(lmimwidth(graph), 1)
+
+        graph = graphs.Grid2dGraph(3, 3)
+        self.assertEqual(lmimwidth(graph), 2)
+
+        graph = graphs.Grid2dGraph(4, 3)
+        self.assertEqual(lmimwidth(graph), 2)

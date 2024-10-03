@@ -74,6 +74,9 @@ def lmimwidth_of_connected_graph(
     bitset_init(suffix_vertices, n)
     bitset_complement(suffix_vertices, suffix_vertices)
 
+    cdef binary_matrix_t new_suffixes
+    binary_matrix_init(new_suffixes, n+1, n)
+
     cdef bitset_t prefix_vertices
     bitset_init(prefix_vertices, n)
 
@@ -103,6 +106,7 @@ def lmimwidth_of_connected_graph(
             current_mim=0,
             prefix_vertices=prefix_vertices,
             suffix_vertices=suffix_vertices,
+            new_suffixes=new_suffixes,
             prefix_neighbors_of_vertex=prefix_neighbors_of_vertex,
             suffix_neighbors_of_vertex=suffix_neighbors_of_vertex,
             seen_states=seen_states,
@@ -118,6 +122,7 @@ def lmimwidth_of_connected_graph(
     finally:
         binary_matrix_free(adjacency_matrix)
         bitset_free(suffix_vertices)
+        binary_matrix_free(new_suffixes)
         sig_free(prefix)
         bitset_free(suffix_neighbors_of_vertex)
         bitset_free(canonical_vertices)
@@ -143,15 +148,13 @@ cdef inline void _build_canonical_vertices(graph: Graph, bitset_t canonical_vert
     for orbit in graph.automorphism_group(orbits=True, return_group=False):
         bitset_add(canonical_vertices, <int> orbit[0])
 
-"""
-upper_bound is inclusive.
-"""
 cdef int _branch_and_bound(
     binary_matrix_t graph,
     int* prefix,
     int current_mim,
     bitset_t prefix_vertices,
     bitset_t suffix_vertices,
+    binary_matrix_t new_suffixes,
     bitset_t prefix_neighbors_of_vertex,
     bitset_t suffix_neighbors_of_vertex,
     dict seen_states,
@@ -163,51 +166,50 @@ cdef int _branch_and_bound(
     int max_prefix_length,
     int max_seen_entries,
 ):
+    """
+    upper_bound is inclusive.
+    """
     cdef int level = _get_level(suffix_vertices)
+    cdef bitset_t new_suffix = new_suffixes.rows[level]
+    bitset_copy(new_suffix, suffix_vertices)
 
-    # If some vertex has no neighbors in the suffix, we could add it to the prefix.
-    # _increment_prefix_greedily_on_existing_parts(
-    #     graph,
-    #     new_suffix,
-    #     parts_used,
-    #     prefix,
-    #     part_of,
-    #     part_neighbors,
-    #     suffix_neighbors_of_vertex,
-    #     part_suffix_neighbors
-    # )
+    _increment_prefix_greedily(
+        graph,
+        prefix,
+        new_suffix,
+        suffix_neighbors_of_vertex,
+    )
 
-    if bitset_isempty(suffix_vertices) and current_mim <= upper_bound:
+    if bitset_isempty(new_suffix) and current_mim <= upper_bound:
         _copy_array(graph.n_cols, prefix, best_order)
         return current_mim
-
+    
     # If we already saw this prefix with same or better current_mim, skip this state.
-    # if _check_state_seen(
-    #     seen_states,
-    #     seen_entries,
-    #     prefix_vertices,
-    #     new_suffix,
-    #     parts_used,
-    #     part_neighbors,
-    #     part_suffix_neighbors,
-    #     max_prefix_length,
-    #     max_seen_entries
-    # ):
-    #     return -1
+    if _check_state_seen(
+        seen_states,
+        seen_entries,
+        prefix_vertices,
+        new_suffix,
+        current_mim,
+        max_prefix_length,
+        max_seen_entries
+    ):
+        return -1
     
     # Add each possible vertex to the order and branch.
 
     cdef int best_solution_found = -1
-    cdef int vertex = bitset_next(suffix_vertices, 0)
+    cdef bitset_t vertices_to_add = canonical_vertices if level == 0 else new_suffix
+    cdef int vertex = bitset_next(vertices_to_add, 0)
     while vertex != -1:
-        bitset_discard(suffix_vertices, vertex)
+        bitset_discard(new_suffix, vertex)
         prefix[level] = vertex
 
         mim = _get_mim_for_cut(
             graph, 
             prefix, 
             prefix_vertices, 
-            suffix_vertices, 
+            new_suffix, 
             prefix_neighbors_of_vertex, 
             suffix_neighbors_of_vertex
         )
@@ -217,7 +219,8 @@ cdef int _branch_and_bound(
             prefix,
             new_current_mim,
             prefix_vertices,
-            suffix_vertices,
+            new_suffix,
+            new_suffixes,
             prefix_neighbors_of_vertex,
             suffix_neighbors_of_vertex,
             seen_states,
@@ -237,8 +240,8 @@ cdef int _branch_and_bound(
             else:    
                 upper_bound = best_solution_found - 1
 
-        bitset_add(suffix_vertices, vertex)
-        vertex = bitset_next(suffix_vertices, vertex + 1)
+        bitset_add(new_suffix, vertex)
+        vertex = bitset_next(vertices_to_add, vertex + 1)
     
     return best_solution_found
 
@@ -307,181 +310,61 @@ cdef int _get_mim_for_cut(
     return mip.solve()
 
 
-# cdef inline void _increment_prefix_greedily_on_existing_parts(
-#     binary_matrix_t graph,
-#     bitset_t suffix_vertices,
-#     int parts_used,
-#     int* prefix,
-#     int* part_of,
-#     binary_matrix_t part_neighbors,
-#     bitset_t suffix_neighbors_of_vertex,
-#     binary_matrix_t part_suffix_neighbors,
-# ):
-#     """Add to prefix all vertices that have the same suffix neighbors as one of the parts."""
-#     cdef int level = _get_level(suffix_vertices)
-#     cdef int vertex
-#     cdef int part
-#     cdef bint suffix_changed = True
-#     while suffix_changed:
-#         suffix_changed = False
-#         vertex = bitset_next(suffix_vertices, 0)
-#         while vertex != -1:
-#             bitset_discard(suffix_vertices, vertex)
+cdef inline void _increment_prefix_greedily(
+    binary_matrix_t graph,
+    int* prefix,
+    bitset_t suffix_vertices,
+    bitset_t suffix_neighbors_of_vertex,
+):
+    """Add to prefix all vertices that have no neighbors in the suffix."""
+    cdef int level = _get_level(suffix_vertices)
+    cdef int vertex
+    cdef bint suffix_changed = True
+    while suffix_changed:
+        suffix_changed = False
+        vertex = bitset_next(suffix_vertices, 0)
+        while vertex != -1:
+            bitset_discard(suffix_vertices, vertex)
 
-#             part = _find_greedy_part_for_vertex(
-#                 vertex,
-#                 graph,
-#                 suffix_vertices,
-#                 parts_used,
-#                 part_neighbors,
-#                 suffix_neighbors_of_vertex,
-#                 part_suffix_neighbors,
-#             )
+            bitset_intersection(
+                suffix_neighbors_of_vertex, 
+                graph.rows[vertex], 
+                suffix_vertices
+            )
 
-#             if part != -1:
-#                 prefix[level] = vertex
-#                 part_of[vertex] = part
-#                 level += 1
-#                 suffix_changed = True
-#             else:
-#                 bitset_add(suffix_vertices, vertex)
+            if bitset_isempty(suffix_neighbors_of_vertex):
+                prefix[level] = vertex
+                level += 1
+                suffix_changed = True
+            else:
+                bitset_add(suffix_vertices, vertex)
 
-#             vertex = bitset_next(suffix_vertices, vertex + 1)
+            vertex = bitset_next(suffix_vertices, vertex + 1)
 
 
-# cdef inline bint _add_vertex_to_prefix_greedily_on_part(
-#     int part,
-#     binary_matrix_t graph,
-#     bitset_t prefix_vertices,
-#     bitset_t suffix_vertices,
-#     bitset_t suffix_neighbors_of_vertex,
-#     binary_matrix_t part_suffix_neighbors,
-#     int* prefix,
-#     int* part_of,
-#     binary_matrix_t part_neighbors,
-# ):
-#     cdef int level = _get_level(suffix_vertices)
-#     cdef bint can_be_added
-#     cdef int vertex = bitset_next(suffix_vertices, 0)
-#     while vertex != -1:
-#         bitset_discard(suffix_vertices, vertex)
+cdef inline bint _check_state_seen(
+    dict seen_states,
+    int* seen_entries,
+    bitset_t prefix_vertices,
+    bitset_t suffix_vertices,
+    int current_mim,
+    int max_prefix_length,
+    int max_seen_entries
+):
+    bitset_complement(prefix_vertices, suffix_vertices)
+    cdef int prefix_len = bitset_len(prefix_vertices)
+    if prefix_len > max_prefix_length:
+        return False
 
-#         bitset_intersection(
-#             suffix_neighbors_of_vertex, 
-#             graph.rows[vertex], 
-#             suffix_vertices
-#         )
-#         can_be_added = _is_greedy_part_for_vertex(
-#             part,
-#             suffix_vertices,
-#             part_neighbors,
-#             suffix_neighbors_of_vertex,
-#             part_suffix_neighbors,
-#         )
-
-#         if can_be_added:
-#             prefix[level] = vertex
-#             part_of[vertex] = part
-#             return True
-
-#         bitset_add(suffix_vertices, vertex)
-#         vertex = bitset_next(suffix_vertices, vertex + 1)
-    
-#     return False 
-
-
-# cdef inline int _find_greedy_part_for_vertex(
-#     int vertex,
-#     binary_matrix_t graph,
-#     bitset_t suffix_vertices,
-#     int parts_used,
-#     binary_matrix_t part_neighbors,
-#     bitset_t suffix_neighbors_of_vertex,
-#     binary_matrix_t part_suffix_neighbors,
-# ):
-#     bitset_intersection(
-#         suffix_neighbors_of_vertex, 
-#         graph.rows[vertex], 
-#         suffix_vertices
-#     )
-#     for part in range(parts_used):
-#         if _is_greedy_part_for_vertex(
-#             part,
-#             suffix_vertices,
-#             part_neighbors,
-#             suffix_neighbors_of_vertex,
-#             part_suffix_neighbors,
-#         ):
-#             return part
-#     return -1
-
-
-# cdef inline bint _is_greedy_part_for_vertex(
-#     int part,
-#     bitset_t suffix_vertices,
-#     binary_matrix_t part_neighbors,
-#     bitset_t suffix_neighbors_of_vertex,
-#     binary_matrix_t part_suffix_neighbors,
-# ):
-#     bitset_intersection(
-#         part_suffix_neighbors.rows[part],
-#         part_neighbors.rows[part],
-#         suffix_vertices
-#     )
-#     return bitset_eq(part_suffix_neighbors.rows[part], suffix_neighbors_of_vertex)
-
-
-# cdef inline bint _check_state_seen(
-#     dict seen_states,
-#     int* seen_entries,
-#     bitset_t prefix_vertices,
-#     bitset_t suffix_vertices,
-#     int parts_used,
-#     binary_matrix_t part_neighbors,
-#     binary_matrix_t part_suffix_neighbors,
-#     int max_prefix_length,
-#     int max_seen_entries
-# ):
-#     bitset_complement(prefix_vertices, suffix_vertices)
-#     cdef int prefix_len = bitset_len(prefix_vertices)
-#     if prefix_len > max_prefix_length:
-#         return False
-
-#     cdef frozenset frozen_prefix_vertices = frozenset(bitset_list(prefix_vertices))
-#     cdef frozenset frozen_part_neighbors = _build_frozen_part_neighbors(
-#         suffix_vertices, parts_used, part_neighbors, part_suffix_neighbors)
-#     cdef dict seen_part_neighbors
-#     cdef int parts_used_before
-#     cdef bint state_seen = False
-#     if frozen_prefix_vertices in seen_states:
-#         seen_part_neighbors = seen_states[frozen_prefix_vertices]
-#         if frozen_part_neighbors in seen_part_neighbors:
-#             parts_used_before = seen_part_neighbors[frozen_part_neighbors]
-#             if parts_used_before <= parts_used:
-#                 state_seen = True
-#             else:
-#                 seen_part_neighbors[frozen_part_neighbors] = parts_used
-#         elif seen_entries[0] < max_seen_entries:
-#             seen_part_neighbors[frozen_part_neighbors] = parts_used
-#             seen_entries[0] += 1
-#     elif seen_entries[0] < max_seen_entries:
-#         seen_states[frozen_prefix_vertices] = {frozen_part_neighbors: parts_used}
-#         seen_entries[0] += 1
-    
-#     return state_seen
-
-
-# cdef inline _build_frozen_part_neighbors(
-#     bitset_t suffix_vertices,
-#     int parts_used, 
-#     binary_matrix_t part_neighbors,
-#     binary_matrix_t part_suffix_neighbors
-# ):
-#     cdef set suffix_part_neighbors = set()
-#     cdef frozenset part_suffix_neighbors_set 
-#     for part in range(parts_used):
-#         bitset_intersection(
-#             part_suffix_neighbors.rows[part], part_neighbors.rows[part], suffix_vertices)
-#         part_suffix_neighbors_set = frozenset(bitset_list(part_suffix_neighbors.rows[part]))
-#         suffix_part_neighbors.add(part_suffix_neighbors_set)
-#     return frozenset(suffix_part_neighbors)
+    cdef frozenset frozen_prefix_vertices = frozenset(bitset_list(prefix_vertices))
+    if frozen_prefix_vertices in seen_states:
+        previous_mim = seen_states[frozen_prefix_vertices]
+        if previous_mim <= current_mim:
+            return True
+        else:
+            seen_states[frozen_prefix_vertices] = current_mim
+            return False
+    elif seen_entries[0] < max_seen_entries:
+        seen_states[frozen_prefix_vertices] = current_mim
+        seen_entries[0] += 1
+        return False
