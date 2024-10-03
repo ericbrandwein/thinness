@@ -11,7 +11,6 @@ from cysignals.signals cimport sig_on, sig_off
 DEFAULT_MAX_PREFIX_LENGTH = 15
 DEFAULT_MAX_SEEN_ENTRIES = 1_000_000
 
-
 def lmimwidth(
     graph: Graph, 
     lower_bound: int = 0, 
@@ -148,6 +147,7 @@ cdef inline void _build_canonical_vertices(graph: Graph, bitset_t canonical_vert
     for orbit in graph.automorphism_group(orbits=True, return_group=False):
         bitset_add(canonical_vertices, <int> orbit[0])
 
+
 cdef int _branch_and_bound(
     binary_matrix_t graph,
     int* prefix,
@@ -198,6 +198,7 @@ cdef int _branch_and_bound(
     
     # Add each possible vertex to the order and branch.
 
+    level = _get_level(new_suffix)
     cdef int best_solution_found = -1
     cdef bitset_t vertices_to_add = canonical_vertices if level == 0 else new_suffix
     cdef int vertex = bitset_next(vertices_to_add, 0)
