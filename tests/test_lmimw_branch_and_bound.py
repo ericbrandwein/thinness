@@ -47,3 +47,6 @@ class TestLmimwBranchAndBound(unittest.TestCase):
 
         graph = graphs.Grid2dGraph(4, 3)
         self.assertEqual(lmimwidth(graph), 2)
+
+        graph = graphs.Grid2dGraph(5, 5)
+        self.assertEqual(lmimwidth(graph), 2)

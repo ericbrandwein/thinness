@@ -169,6 +169,9 @@ cdef int _branch_and_bound(
     """
     upper_bound is inclusive.
     """
+    if current_mim > upper_bound:
+        return -1
+    
     cdef int level = _get_level(suffix_vertices)
     cdef bitset_t new_suffix = new_suffixes.rows[level]
     bitset_copy(new_suffix, suffix_vertices)
@@ -195,6 +198,10 @@ cdef int _branch_and_bound(
         max_seen_entries
     ):
         return -1
+
+    if current_mim >= _suffix_mim(new_suffix, seen_states):
+        # We cannot rebuild the best order this way :/
+        return current_mim
     
     # Add each possible vertex to the order and branch.
 
@@ -369,3 +376,8 @@ cdef inline bint _check_state_seen(
         seen_states[frozen_prefix_vertices] = current_mim
         seen_entries[0] += 1
         return False
+
+
+cdef inline int _suffix_mim(bitset_t suffix_vertices, dict seen_states):
+    cdef frozenset frozen_prefix_vertices = frozenset(bitset_list(suffix_vertices))
+    return seen_states.get(frozen_prefix_vertices, suffix_vertices.size)
