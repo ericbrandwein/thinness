@@ -44,4 +44,6 @@ def _partition(vertices_per_side: int):
 
     if vertices_per_side % 2 == 0:
         partition[0].add(vertices_per_side*2-2)
+    else:
+        partition[parts-1].add(vertices_per_side*2-1)
     return partition
