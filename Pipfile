@@ -8,6 +8,7 @@ z3-solver = "*"
 setuptools = "*"
 linetimer = "*"
 cython = "*"
+tqdm = "*"
 
 [dev-packages]
 snakeviz = "*"
