@@ -6,14 +6,15 @@ def show_graph_with_js(graph, **kwargs):
     graph.show(method='js', link_distance=0, charge=0, link_strength=0, gravity=0, force_spring_layout=False, **kwargs)
 
 
-def show_graph(graph):
-    with NamedTemporaryFile() as file:
-        graph.plot().save(file.name)
+def show_plot(plot):
+    with NamedTemporaryFile(suffix='.png', delete=False) as file:
+        plot.save(file.name)
+        print(file.name)
         subprocess.run(["xdg-open", file.name], check=True)
 
 
-def show_compatibility_graph(graph):
-    show_graph(graph, edge_labels=True)
+def show_graph(graph):
+    show_plot(graph.plot())
 
 
 def _partition_by_order(solution):
@@ -23,9 +24,9 @@ def _partition_by_order(solution):
     ]
 
 
-def plot_solution(graph, solution):
+def show_solution(graph, solution):
     graph.relabel({
         element: index
         for index, element in enumerate(solution.order)
     })
-    graph.plot(partition=_partition_by_order(solution)).save('solution.png')
+    show_plot(graph.plot(partition=_partition_by_order(solution)))
