@@ -205,8 +205,6 @@ def thinness_of_C4_cycle_with_one_I2():
 
     return calculate_thinness(graph, lower_bound=2)
 
-# thinness_of_modular_cycles(Graph(2), 10)
-
 
 def check_every_5_modular_cycle_of_thin_2_graphs_has_thinness_6():
     i = 0
@@ -312,8 +310,8 @@ def test_simplify_modules():
 def simplify_modules_conterexample():
     return Graph('HCOf?z~')
 
-graph = simplify_modules_conterexample()
-print(calculate_thinness(graph))
-print(calculate_thinness(simplify_modules(graph)))
 
-# test_simplify_modules()
+def test_simplify_modules_conterexample():
+    graph = simplify_modules_conterexample()
+    simplified = simplify_modules(graph)
+    assert(calculate_thinness(simplified) != calculate_thinness(graph))
