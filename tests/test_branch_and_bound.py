@@ -8,7 +8,7 @@ from sage.misc.randstate import set_random_seed
 from thinness.branch_and_bound import calculate_thinness
 from thinness.z3 import Z3ThinnessSolver
 from thinness.verify import verify_solution
-
+from thinness.shower import show_graph, show_solution
 
 class TestBranchAndBound(unittest.TestCase):
     def _assert_thinness_of_graph(self, graph: Graph, expected_thinness: int):
@@ -60,6 +60,12 @@ class TestBranchAndBound(unittest.TestCase):
             thinness = solver.solve(graph).thinness
             with self.subTest(graph=graph.graph6_string()):
                 self._assert_thinness_of_graph(graph, thinness)
+
+    def test_thinness_of_join(self):
+        graph = Graph('GCOf?w')
+        self._assert_thinness_of_graph(graph, 2)
+        joined_graph = graph.join(Graph(1), labels='integers')
+        self._assert_thinness_of_graph(joined_graph, 2)
 
 
 def crown_graph(vertices_per_side: int) -> Graph:
