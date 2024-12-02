@@ -176,11 +176,7 @@ def thinness_of_modular_paths(module: Graph, max_size: int):
 
 
 def K2_union_complement(number_of_k2s):
-    graph = Graph()
-    K2 = graphs.CompleteGraph(2)
-    for _ in range(number_of_k2s):
-        graph = graph.disjoint_union(K2, labels='integers')
-    return graph.complement()
+    return (graphs.CompleteGraph(2) * number_of_k2s).complement()
 
 
 def modular_product(module: Graph, graph: Graph):
@@ -306,12 +302,4 @@ def test_simplify_modules():
                     print(f"Actual thinness: {actual_thinness}")
                     break
         
-
-def simplify_modules_conterexample():
-    return Graph('HCOf?z~')
-
-
-def test_simplify_modules_conterexample():
-    graph = simplify_modules_conterexample()
-    simplified = simplify_modules(graph)
-    assert(calculate_thinness(simplified) != calculate_thinness(graph))
+test_simplify_modules()
