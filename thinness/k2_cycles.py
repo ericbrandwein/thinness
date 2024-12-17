@@ -286,20 +286,56 @@ def test_simplify_modules():
         print(f"Order {i}")
         for graph in tqdm(graphs(i)):
             decomposition = modular_decomposition(graph)
-            thinnesses = [
-                calculate_thinness(module_subgraph(graph, node))
-                for node in decomposition.children
-            ]
-            if max(thinnesses) >= 2:
-                reduced_graph = transform_modules_to_K2_complements(graph, decomposition, thinnesses)
-                reduced_thinness = calculate_thinness(reduced_graph)
-                actual_thinness = calculate_thinness(graph)
-                if reduced_thinness != actual_thinness:
-                    print("FOUND COUNTEREXAMPLE!!!")
-                    print(f"Graph: {graph.graph6_string()}")
-                    print(f"Reduced graph: {reduced_graph.graph6_string()}")
-                    print(f"Reduced thinness: {reduced_thinness}")
-                    print(f"Actual thinness: {actual_thinness}")
-                    break
-        
-test_simplify_modules()
+            if decomposition.node_type == NodeType.PRIME:
+                thinnesses = [
+                    calculate_thinness(module_subgraph(graph, node))
+                    for node in decomposition.children
+                ]
+                if max(thinnesses) >= 2:
+                    reduced_graph = transform_modules_to_K2_complements(graph, decomposition, thinnesses)
+                    reduced_thinness = calculate_thinness(reduced_graph)
+                    actual_thinness = calculate_thinness(graph)
+                    if reduced_thinness != actual_thinness:
+                        print("FOUND COUNTEREXAMPLE!!!")
+                        print(f"Graph: {graph.graph6_string()}")
+                        print(f"Reduced graph: {reduced_graph.graph6_string()}")
+                        print(f"Reduced thinness: {reduced_thinness}")
+                        print(f"Actual thinness: {actual_thinness}")
+                        break
+
+
+def connected_graphs(n):
+    return graphs.nauty_geng(f'-c {n}')
+
+
+def graphs_with_thinness(thinness: int, max_order: int):
+    for i in range(2, max_order + 1):
+        for graph in connected_graphs(i):
+            if calculate_thinness(graph) == thinness:
+                yield graph
+
+
+def test_simplify_modules_on_modular_products_of_unions():
+    print('Calculating graphs with thinness 2...')
+    thinness_2_graphs = list(graphs_with_thinness(2, 5))
+    print('Calculated.')
+    progress_bar = tqdm(total=len(thinness_2_graphs)**2)
+    for half_module in thinness_2_graphs:
+        module = half_module * 2
+        for structure in thinness_2_graphs:
+            graph = modular_product(module, structure)
+            simplified_graph = simplify_modules(graph)
+            thinness = calculate_thinness(graph)
+            simplified_thinness = calculate_thinness(simplified_graph)
+            if thinness != simplified_thinness:
+                print("FOUND COUNTEREXAMPLE!!!")
+                print(f"Module: {module.graph6_string()}")
+                print(f"Structure: {structure.graph6_string()}")
+                print(f"Graph: {graph.graph6_string()}")
+                print(f"Simplified: {simplified_graph.graph6_string()}")
+                break
+            progress_bar.update()
+    progress_bar.close()
+
+
+test_simplify_modules_on_modular_products_of_unions()
