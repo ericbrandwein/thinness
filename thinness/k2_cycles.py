@@ -338,4 +338,51 @@ def test_simplify_modules_on_modular_products_of_unions():
     progress_bar.close()
 
 
-test_simplify_modules_on_modular_products_of_unions()
+# graph = Graph('PoCOZB~wVA{IwRFfbrw{}Ffk')
+# solution = calculate_thinness(graph, certificate=True)
+# show_solution(graph, solution)
+
+
+def replace_vertex_by_module(graph: Graph, vertex, module: Graph):
+    new_graph = graph.disjoint_union(module)
+    new_graph.delete_vertex((0, vertex))
+    for neighbor in graph.neighbors(vertex):
+        for module_vertex in module.vertices():
+            new_graph.add_edge((0, neighbor), (1, module_vertex))
+    return new_graph
+
+
+def search_counterexample_of_modules_are_consecutive():
+    """
+    Te cagué.
+    Graph: FCrdo
+    With one cycle: IEysKMD`g	2
+    With two cycles: MEysKMD`kGO``@`A_	3
+    """
+    cycle = graphs.CycleGraph(4)
+    two_cycles = cycle * 2
+    for order in range(4, 100):
+        print(f"Order {order}")
+        for graph in tqdm(connected_graphs(order)):
+            for vertex in graph:
+                graph_with_one_cycle = replace_vertex_by_module(graph, vertex, cycle)
+                graph_with_two_cycles = replace_vertex_by_module(graph, vertex, two_cycles)
+                thinness_one_cycle = calculate_thinness(graph_with_one_cycle)
+                thinness_two_cycles = calculate_thinness(graph_with_two_cycles)
+                if thinness_one_cycle != thinness_two_cycles:
+                    print("Te cagué.")
+                    print(f"Graph: {graph.graph6_string()}")
+                    print(f"With one cycle: {graph_with_one_cycle.graph6_string()}\t{thinness_one_cycle}")
+                    print(f"With two cycles: {graph_with_two_cycles.graph6_string()}\t{thinness_two_cycles}")
+
+
+# search_counterexample_of_modules_are_consecutive()
+
+def counterexample_of_modules_are_consecutive():
+    return Graph('FCrdo'), Graph('IEysKMD`g'), Graph('MEysKMD`kGO``@`A_')
+
+
+counterexample = counterexample_of_modules_are_consecutive()
+show_solution(counterexample[1], calculate_thinness(counterexample[1], certificate=True))
+show_solution(counterexample[2], calculate_thinness(counterexample[2], certificate=True))
+
