@@ -1,0 +1,25 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: Graph thinness algorithms
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Eric
+    family-names: Brandwein
+    email: brandweineric@gmail.com
+    orcid: 'https://orcid.org/0009-0003-2559-7173'
+    affiliation: Universidad de Buenos Aires
+repository-code: 'https://github.com/ericbrandwein/thinness'
+abstract: >-
+  Fast algorithms for the thinness of a graph, and other
+  graph parameters.
+keywords:
+  - graph theory
+  - graph parameters
+  - thinness
+  - proper thinness
+  - linear mim-width
