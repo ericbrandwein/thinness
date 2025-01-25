@@ -2,7 +2,7 @@ from sage.graphs.graph import Graph
 from sage.graphs.digraph import DiGraph
 from sage.graphs.graph_generators import graphs
 from thinness.branch_and_bound import calculate_thinness
-from thinness.data import load_graphs_by_thinness
+from thinness.data import load_graphs_by_thinness, read_adjacency_list_with_coordinates
 from thinness.shower import show_graph, show_solution
 from thinness.compatibility import build_compatibility_graph
 from thinness.consistent_solution import ConsistentSolution
@@ -381,7 +381,7 @@ def search_counterexample_of_flavias_conjecture():
     cycle = graphs.CycleGraph(4)
     two_cycles = cycle * 2
     three_cycles = cycle * 3
-    for order in range(20, 100):
+    for order in range(21, 100):
         print(f"Order {order}")
         for graph in tqdm(connected_graphs(order)):
             for vertex in graph:
@@ -396,13 +396,41 @@ def search_counterexample_of_flavias_conjecture():
                     print(f"With three cycles: {graph_with_three_cycles.graph6_string()}\t{thinness_three_cycles}")
 
 
+def search_counterexample_of_second_flavias_conjecture():
+    cycle = (graphs.CompleteGraph(2) * 3).complement()
+    two_cycles = cycle * 2
+    three_cycles = cycle * 3
+    for order in range(2, 100):
+        print(f"Order {order}")
+        for graph in tqdm(connected_graphs(order)):
+            for vertex in graph:
+                graph_with_two_cycles = replace_vertex_by_module(graph, vertex, two_cycles)
+                thinness_two_cycles = calculate_thinness(graph_with_two_cycles)
+                graph_with_three_cycles = replace_vertex_by_module(graph, vertex, three_cycles)
+                thinness_three_cycles = calculate_thinness(graph_with_three_cycles)
+                if thinness_two_cycles != thinness_three_cycles:
+                    print("Te cagué.")
+                    print(f"Graph: {graph.graph6_string()}")
+                    print(f"With two 3K2^c: {graph_with_two_cycles.graph6_string()}\t{thinness_two_cycles}")
+                    print(f"With three 3K2^c: {graph_with_three_cycles.graph6_string()}\t{thinness_three_cycles}")
+                    return
 
 # search_counterexample_of_modules_are_consecutive()
 
 def counterexample_of_modules_are_consecutive():
-    return Graph('FCrdo'), Graph('IEysKMD`g'), Graph('MEysKMD`kGO``@`A_')
+    return Graph('FQzTo'), Graph('IMyskmTdg'), Graph('MMyskmTdkgQ`d@dA_')
 
-# search_counterexample_of_flavias_conjecture()
+search_counterexample_of_second_flavias_conjecture()
+
+# first = calculate_thinness(Graph('Q?BwGGF@oN_}@?@??_WGE@?{CBo'))
+# second = calculate_thinness(Graph('W?BwGGF@oN_}@?@??_WGE@?{CBoG??G??C?B@??oG?F__?]'))
+# print(first, second)
+
+# nicer_counterexample = read_adjacency_list_with_coordinates(
+#     'graphs/falopita-2.txt'
+# )
+# solution = calculate_thinness(nicer_counterexample, certificate=True)
+# show_solution(nicer_counterexample, solution)
 
 
 def horizontal_union(graph1: Graph, graph2: Graph):
@@ -468,83 +496,83 @@ def upright_square_graph():
     return cycle_graph
 
 
-grid = graphs.Grid2dGraph(2, 3)
-grid.add_edge((0, 0), (0, 2))
-grid_join = horizontal_join(grid, grid)
+# grid = graphs.Grid2dGraph(2, 3)
+# grid.add_edge((0, 0), (0, 2))
+# grid_join = horizontal_join(grid, grid)
 
-cycle_graph = upright_square_graph()
-two_cycles = horizontal_union(cycle_graph, cycle_graph)
-three_cycles = horizontal_union(two_cycles, cycle_graph)
+# cycle_graph = upright_square_graph()
+# two_cycles = horizontal_union(cycle_graph, cycle_graph)
+# three_cycles = horizontal_union(two_cycles, cycle_graph)
 
-one_cycle_one_grid = vertical_union(grid, cycle_graph)
-one_cycle_one_grid.relabel()
-for cycle_vertex in range(cycle_graph.order()):
-    for grid_vertex in (1, 2):
-        one_cycle_one_grid.add_edge(grid_vertex, grid.order() + cycle_vertex)
-solution = calculate_thinness(one_cycle_one_grid, certificate=True)
-# show_solution(one_cycle_one_grid, solution)
-
-
-two_cycles_one_grid = vertical_union(grid, two_cycles)
-two_cycles_one_grid.relabel()
-for cycle_vertex in range(two_cycles.order()):
-    for grid_vertex in (1, 2):
-        two_cycles_one_grid.add_edge(grid_vertex, grid.order() + cycle_vertex)
-solution = calculate_thinness(two_cycles_one_grid, certificate=True)
-# show_solution(two_cycles_one_grid, solution)
-
-two_vertices = Graph(2)
-two_vertices.set_pos({0: (0, 0), 1: (1, 0)})
-
-column_graph = vertical_join(two_vertices, grid)
-two_columns = horizontal_union(column_graph, column_graph)
-graph = vertical_union(two_columns, two_cycles)
-graph.relabel()
-for cycle_vertex in range(two_cycles.order()):
-    for grid_vertex in (3, 4):
-        graph.add_edge(grid_vertex, two_columns.order() + cycle_vertex)
-        graph.add_edge(grid_vertex + column_graph.order(), two_columns.order() + cycle_vertex)
-
-for i in range(2):
-    for j in range(2):
-        graph.add_edge(i, column_graph.order() + j)
-
-for grid_vertex in (3, 4):
-    for other_grid_vertex in (3, 4):
-        graph.add_edge(grid_vertex, column_graph.order() + other_grid_vertex)
-
-last_graph = vertical_union(graph, two_vertices)
-last_graph.relabel()
-for i in range(2):
-    for j in range(2):
-        last_graph.add_edge(i, last_graph.order() - j - 1)
-        last_graph.add_edge(column_graph.order() + i, last_graph.order() - j - 1)
+# one_cycle_one_grid = vertical_union(grid, cycle_graph)
+# one_cycle_one_grid.relabel()
+# for cycle_vertex in range(cycle_graph.order()):
+#     for grid_vertex in (1, 2):
+#         one_cycle_one_grid.add_edge(grid_vertex, grid.order() + cycle_vertex)
+# solution = calculate_thinness(one_cycle_one_grid, certificate=True)
+# # show_solution(one_cycle_one_grid, solution)
 
 
-solution = calculate_thinness(last_graph, certificate=True)
-show_solution(last_graph, solution)
+# two_cycles_one_grid = vertical_union(grid, two_cycles)
+# two_cycles_one_grid.relabel()
+# for cycle_vertex in range(two_cycles.order()):
+#     for grid_vertex in (1, 2):
+#         two_cycles_one_grid.add_edge(grid_vertex, grid.order() + cycle_vertex)
+# solution = calculate_thinness(two_cycles_one_grid, certificate=True)
+# # show_solution(two_cycles_one_grid, solution)
+
+# two_vertices = Graph(2)
+# two_vertices.set_pos({0: (0, 0), 1: (1, 0)})
+
+# column_graph = vertical_join(two_vertices, grid)
+# two_columns = horizontal_union(column_graph, column_graph)
+# graph = vertical_union(two_columns, two_cycles)
+# graph.relabel()
+# for cycle_vertex in range(two_cycles.order()):
+#     for grid_vertex in (3, 4):
+#         graph.add_edge(grid_vertex, two_columns.order() + cycle_vertex)
+#         graph.add_edge(grid_vertex + column_graph.order(), two_columns.order() + cycle_vertex)
+
+# for i in range(2):
+#     for j in range(2):
+#         graph.add_edge(i, column_graph.order() + j)
+
+# for grid_vertex in (3, 4):
+#     for other_grid_vertex in (3, 4):
+#         graph.add_edge(grid_vertex, column_graph.order() + other_grid_vertex)
+
+# last_graph = vertical_union(graph, two_vertices)
+# last_graph.relabel()
+# for i in range(2):
+#     for j in range(2):
+#         last_graph.add_edge(i, last_graph.order() - j - 1)
+#         last_graph.add_edge(column_graph.order() + i, last_graph.order() - j - 1)
+
+
+# solution = calculate_thinness(last_graph, certificate=True)
+# show_solution(last_graph, solution)
 
 
 
-graph_two_cycles_module = vertical_union(grid_join, two_cycles)
-graph_two_cycles_module.relabel()
+# graph_two_cycles_module = vertical_union(grid_join, two_cycles)
+# graph_two_cycles_module.relabel()
 
-graph_three_cycles_module = vertical_union(grid_join, three_cycles)
-graph_three_cycles_module.relabel()
+# graph_three_cycles_module = vertical_union(grid_join, three_cycles)
+# graph_three_cycles_module.relabel()
 
-for cycle_vertex in range(two_cycles.order()):
-    for grid_vertex in (1, 2, 6, 7):
-        graph_two_cycles_module.add_edge(grid_vertex, grid_join.order() + cycle_vertex)
+# for cycle_vertex in range(two_cycles.order()):
+#     for grid_vertex in (1, 2, 6, 7):
+#         graph_two_cycles_module.add_edge(grid_vertex, grid_join.order() + cycle_vertex)
 
-for cycle_vertex in range(three_cycles.order()):
-    for grid_vertex in (1, 2, 6, 7):
-        graph_three_cycles_module.add_edge(grid_vertex, grid_join.order() + cycle_vertex)
+# for cycle_vertex in range(three_cycles.order()):
+#     for grid_vertex in (1, 2, 6, 7):
+#         graph_three_cycles_module.add_edge(grid_vertex, grid_join.order() + cycle_vertex)
 
 
-solution = calculate_thinness(graph_two_cycles_module, certificate=True)
-# show_solution(graph_two_cycles_module, solution)
-solution = calculate_thinness(graph_three_cycles_module, certificate=True)
-# show_solution(graph_three_cycles_module, solution)
+# solution = calculate_thinness(graph_two_cycles_module, certificate=True)
+# # show_solution(graph_two_cycles_module, solution)
+# solution = calculate_thinness(graph_three_cycles_module, certificate=True)
+# # show_solution(graph_three_cycles_module, solution)
 
 
 # graph = Graph('LhUN~~|~Nw~tW`')
