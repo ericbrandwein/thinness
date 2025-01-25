@@ -150,21 +150,21 @@ def thinness_of_some_graphs():
         print(f'{n}: {thinness}')
 
 if __name__ == '__main__':
-    # print("Crown graphs:")
-    # time_crown_graphs()
+    print("Crown graphs:")
+    time_crown_graphs()
 
-    # set_random_seed(0)
-    # print("Random GNM graphs:")
-    # time_random_graphs()
+    set_random_seed(0)
+    print("Random GNM graphs:")
+    time_random_graphs()
 
-    # print("Complement of n*K2 graphs:")
-    # time_complement_of_nK2()
+    print("Complement of n*K2 graphs:")
+    time_complement_of_nK2()
 
-    # print("Grid graphs:")
-    # time_grid_graphs()
+    print("Grid graphs:")
+    time_grid_graphs()
     
-    # print("Cylinder graphs:")
-    # time_cylinder_graphs()
+    print("Cylinder graphs:")
+    time_cylinder_graphs()
 
     # print(cylinder_graph(3,2).graph6_string())
 

@@ -9,6 +9,7 @@ setuptools = "*"
 linetimer = "*"
 cython = "*"
 tqdm = "*"
+snakeviz = "*"
 
 [dev-packages]
 snakeviz = "*"
