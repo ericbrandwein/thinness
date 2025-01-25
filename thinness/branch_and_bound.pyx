@@ -23,7 +23,7 @@ def calculate_thinness(
     max_prefix_length: int = DEFAULT_MAX_PREFIX_LENGTH, 
     max_seen_entries: int = DEFAULT_MAX_SEEN_ENTRIES
 ) -> ConsistentSolution | int:
-    components = [graph.subgraph(component, immutable=False) for component in graph.connected_components()]
+    components = [graph.subgraph(component, immutable=False) for component in graph.connected_components(sort=False)]
     relabellings = [component.relabel(return_map=True) for component in components]
     solutions = [
         calculate_thinness_of_connected_graph(
@@ -261,6 +261,7 @@ cdef int _branch_and_bound(
         _copy_array(graph.n_cols, part_of, best_partition)
         return parts_used
 
+    # The bug is gone when commenting the following if
     if _check_state_seen(
         seen_states,
         seen_entries,

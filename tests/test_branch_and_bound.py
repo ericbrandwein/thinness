@@ -67,6 +67,12 @@ class TestBranchAndBound(unittest.TestCase):
         joined_graph = graph.join(Graph(1), labels='integers')
         self._assert_thinness_of_graph(joined_graph, 2)
 
+    def test_thinness_of_induced_subgraphs(self):
+        first = Graph(r'Mi\rzx?OA@gEONON?')
+        second = Graph(r'Si\rzx?OA@gEONONG?A??O?L??q?@y?@w')
+        self.assertTrue(first.is_subgraph(second, induced=True, up_to_isomorphism=True))
+        self.assertGreaterEqual(calculate_thinness(second), calculate_thinness(first))
+
 
 def crown_graph(vertices_per_side: int) -> Graph:
     graph = Graph(2*vertices_per_side)
