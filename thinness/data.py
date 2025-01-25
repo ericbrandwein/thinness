@@ -96,3 +96,28 @@ def load_graphs_by_proper_thinness(n=MAX_ORDER):
         26
     """
     return _load_graphs_by_width_parameter(n, PROPER_THINNESS)
+
+
+def read_adjacency_list_with_coordinates(filename):
+    with open(filename) as file:
+        lines = file.read().splitlines()
+        graph = Graph(int(lines[0]))
+        positions = {}
+        for vertex, line in enumerate(lines[1:]):
+            entries = line.split()
+            positions[vertex] = entries[:2]
+            neighbors = entries[2:]
+            graph.add_edges((vertex, int(x)) for x in neighbors)
+
+        graph.set_pos(positions)
+    return graph
+
+
+def write_adjacency_list_with_coordinates(graph: Graph, filename):
+    relabeled = graph.relabel(inplace=False)
+    with open(filename, 'w') as file:
+        file.write(f'{relabeled.order()}\n')
+        positions = relabeled.get_pos()
+        for vertex in relabeled:
+            neighbors = ' '.join(str(neighbor) for neighbor in relabeled.neighbors(vertex))
+            file.write(f'{positions[vertex][0]} {positions[vertex][1]} {neighbors}\n')
