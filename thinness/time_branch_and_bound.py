@@ -150,8 +150,8 @@ def thinness_of_some_graphs():
         print(f'{n}: {thinness}')
 
 if __name__ == '__main__':
-    print("Crown graphs:")
-    time_crown_graphs()
+    # print("Crown graphs:")
+    # time_crown_graphs()
 
     set_random_seed(0)
     print("Random GNM graphs:")
@@ -174,7 +174,7 @@ if __name__ == '__main__':
 
     # thinness_of_combination_graphs()
 
-    thinness_of_some_graphs()
+    # thinness_of_some_graphs()
 
     
     
