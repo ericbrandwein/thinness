@@ -816,25 +816,19 @@ cdef inline bint _check_state_seen(
     cdef frozenset frozen_prefix_vertices = frozenset(bitset_list(prefix_vertices))
     frozen_part_neighbors = _build_frozen_part_neighbors(
         suffix_vertices, parts_used, part_neighbors, part_suffix_neighbors)
-    cdef dict seen_part_neighbors
-    cdef int parts_used_before
-    cdef bint state_seen = False
+    cdef set seen_part_neighbors
     if frozen_prefix_vertices in seen_states:
         seen_part_neighbors = seen_states[frozen_prefix_vertices]
         if frozen_part_neighbors in seen_part_neighbors:
-            parts_used_before = seen_part_neighbors[frozen_part_neighbors]
-            if parts_used_before <= parts_used:
-                state_seen = True
-            else:
-                seen_part_neighbors[frozen_part_neighbors] = parts_used
+            return True
         elif seen_entries[0] < max_seen_entries:
-            seen_part_neighbors[frozen_part_neighbors] = parts_used
+            seen_part_neighbors.add(frozen_part_neighbors)
             seen_entries[0] += 1
     elif seen_entries[0] < max_seen_entries:
-        seen_states[frozen_prefix_vertices] = {frozen_part_neighbors: parts_used}
+        seen_states[frozen_prefix_vertices] = {frozen_part_neighbors}
         seen_entries[0] += 1
     
-    return state_seen
+    return False
 
 
 cdef inline _build_frozen_part_neighbors(
