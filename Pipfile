@@ -10,6 +10,7 @@ linetimer = "*"
 cython = "*"
 tqdm = "*"
 snakeviz = "*"
+multiset = "*"
 
 [dev-packages]
 snakeviz = "*"

@@ -1,4 +1,5 @@
 import itertools
+from multiset import Multiset, FrozenMultiset
 
 from sage.graphs.graph import Graph
 from sage.data_structures.bitset import Bitset
@@ -813,7 +814,7 @@ cdef inline bint _check_state_seen(
         return False
 
     cdef frozenset frozen_prefix_vertices = frozenset(bitset_list(prefix_vertices))
-    cdef frozenset frozen_part_neighbors = _build_frozen_part_neighbors(
+    frozen_part_neighbors = _build_frozen_part_neighbors(
         suffix_vertices, parts_used, part_neighbors, part_suffix_neighbors)
     cdef dict seen_part_neighbors
     cdef int parts_used_before
@@ -842,14 +843,14 @@ cdef inline _build_frozen_part_neighbors(
     binary_matrix_t part_neighbors,
     binary_matrix_t part_suffix_neighbors
 ):
-    cdef set suffix_part_neighbors = set()
-    cdef frozenset part_suffix_neighbors_set 
+    suffix_part_neighbors = Multiset()
+    cdef frozenset part_suffix_neighbors_set
     for part in range(parts_used):
         bitset_intersection(
             part_suffix_neighbors.rows[part], part_neighbors.rows[part], suffix_vertices)
         part_suffix_neighbors_set = frozenset(bitset_list(part_suffix_neighbors.rows[part]))
         suffix_part_neighbors.add(part_suffix_neighbors_set)
-    return frozenset(suffix_part_neighbors)
+    return FrozenMultiset(suffix_part_neighbors)
 
 
 cdef inline void _update_part_neighbors(
