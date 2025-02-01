@@ -46,7 +46,12 @@ This will build the image with the name `thinness_sage`. You can then run the co
 sudo docker run --mount type=bind,source=.,target=/thinness-sage -it thinness_sage
 ```
 
-Once inside the container, run `pipenv run build` and done! You have a working environment where you can run your scripts.
+Once inside the container, run `pipenv run build` and done! You have a working environment where you can run your scripts:
+
+```bash
+pipenv shell
+python -m thinness.para_manu
+```
 
 ## Classification of small graphs
 The minimal graphs for each thinness and proper thinness value for graphs with up to 10 vertices can be found in the CSV files in [data/](data/).
