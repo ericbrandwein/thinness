@@ -1,4 +1,5 @@
 import sys
+from tqdm import tqdm
 from datetime import datetime
 import multiprocessing as mp
 from sage.graphs.graph import Graph
@@ -14,23 +15,25 @@ GRAPHS_PER_ORDER = [1,1,1,2,6,21,112,853,11117,261080,11716571,1006700565,164059
 CHUNK_SIZE = 2000
 
 
-def process_graph(graph):
-    thinness = calculate_thinness(graph)
-    return graph.graph6_string(), thinness
+def process_graph(params):
+    G, graphs_dict = params
+    thinness = calculate_thinness(G)
+    is_minimal = thinness > 1 and not has_induced_subgraph(G, graphs_dict[thinness])
+    return G.graph6_string(), thinness, is_minimal
 
 
-def estimate_time_remaining(start_time, graphs_processed, graphs_remaining):
-    elapsed = datetime.today() - start_time
-    time_per_graph = elapsed / graphs_processed
-    return time_per_graph * graphs_remaining
+# def estimate_time_remaining(start_time, graphs_processed, graphs_remaining):
+#     elapsed = datetime.today() - start_time
+#     time_per_graph = elapsed / graphs_processed
+#     return time_per_graph * graphs_remaining
 
 
-def print_updated_progress(n, index, start_time):
-    if index % CHUNK_SIZE == 0:
-        graphs_processed = index + 1
-        graphs_remaining = GRAPHS_PER_ORDER[n] - graphs_processed
-        time_remaining = estimate_time_remaining(start_time, graphs_processed, graphs_remaining)
-        print(f'{graphs_processed:,} total graphs processed, {graphs_remaining:,} remaining. Time remaining: {time_remaining}', end='\r')
+# def print_updated_progress(n, index, start_time):
+#     if index % CHUNK_SIZE == 0:
+#         graphs_processed = index + 1
+#         graphs_remaining = GRAPHS_PER_ORDER[n] - graphs_processed
+#         time_remaining = estimate_time_remaining(start_time, graphs_processed, graphs_remaining)
+#         print(f'{graphs_processed:,} total graphs processed, {graphs_remaining:,} remaining. Time remaining: {time_remaining}', end='\r')
 
 
 def print_found_graph(graph6, thinness):
@@ -48,18 +51,26 @@ def skip_processed_graphs(graphs):
 
 
 def fill_csvs_paralelly(n=10):
+    graphs_dict = load_graphs_by_thinness(n-1)
+    graphs_dict.setdefault(int(n/2), [])
     graphs = connected_graphs_upto(n, start=n)
+    # last_skipped_graph = skip_processed_graphs(graphs)
     
-    start_time = datetime.today()
     with mp.Pool() as pool:
-        process_map = pool.imap(process_graph, graphs, chunksize=CHUNK_SIZE)
-        for index, (graph6, thinness) in enumerate(process_map):
-            print_updated_progress(n, index, start_time)
-        
+        params = ((G, graphs_dict) for G in graphs)
+        process_map = pool.imap(process_graph, params, chunksize=CHUNK_SIZE)
+        for graph6, thinness, is_minimal in tqdm(process_map):
+            if is_minimal:
+                save_graph_with_thinness(graph6, thinness)
+                print_found_graph(graph6, thinness)
+
 
 def minimum_partition_for_vertex_order(graph: Graph, vertex_order: list[int]):
     compatibility_graph = build_compatibility_graph(graph, vertex_order)
     return compatibility_graph.coloring()
 
+
 if __name__ == '__main__':
-    fill_csvs_paralelly(n=12)
+    for i in range(4, 12):
+        print(f'Processing graphs of order {i}...')
+        fill_csvs_paralelly(i)
