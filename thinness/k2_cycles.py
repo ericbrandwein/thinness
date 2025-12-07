@@ -381,19 +381,20 @@ def search_counterexample_of_flavias_conjecture():
     cycle = graphs.CycleGraph(4)
     two_cycles = cycle * 2
     three_cycles = cycle * 3
-    for order in range(21, 100):
+    for order in range(4, 100):
         print(f"Order {order}")
         for graph in tqdm(connected_graphs(order)):
-            for vertex in graph:
-                graph_with_two_cycles = replace_vertex_by_module(graph, vertex, two_cycles)
-                thinness_two_cycles = calculate_thinness(graph_with_two_cycles)
-                graph_with_three_cycles = replace_vertex_by_module(graph, vertex, three_cycles)
-                thinness_three_cycles = calculate_thinness(graph_with_three_cycles)
-                if thinness_three_cycles != thinness_two_cycles:
-                    print("Te cagué.")
-                    print(f"Graph: {graph.graph6_string()}")
-                    print(f"With two cycles: {graph_with_two_cycles.graph6_string()}\t{thinness_two_cycles}")
-                    print(f"With three cycles: {graph_with_three_cycles.graph6_string()}\t{thinness_three_cycles}")
+            if calculate_thinness(graph) == 3:
+                for vertex in graph:
+                    graph_with_two_cycles = replace_vertex_by_module(graph, vertex, two_cycles)
+                    thinness_two_cycles = calculate_thinness(graph_with_two_cycles)
+                    graph_with_three_cycles = replace_vertex_by_module(graph, vertex, three_cycles)
+                    thinness_three_cycles = calculate_thinness(graph_with_three_cycles)
+                    if thinness_three_cycles != thinness_two_cycles:
+                        print("Te cagué.")
+                        print(f"Graph: {graph.graph6_string()}")
+                        print(f"With two cycles: {graph_with_two_cycles.graph6_string()}\t{thinness_two_cycles}")
+                        print(f"With three cycles: {graph_with_three_cycles.graph6_string()}\t{thinness_three_cycles}")
 
 
 def search_counterexample_of_second_flavias_conjecture():
@@ -420,7 +421,13 @@ def search_counterexample_of_second_flavias_conjecture():
 def counterexample_of_modules_are_consecutive():
     return Graph('FQzTo'), Graph('IMyskmTdg'), Graph('MMyskmTdkgQ`d@dA_')
 
-search_counterexample_of_second_flavias_conjecture()
+_, first, second = counterexample_of_modules_are_consecutive()
+solution = calculate_thinness(first, certificate=True)
+print(solution)
+show_solution(first, solution)
+# assert(calculate_thinness(first) != calculate_thinness(second))
+
+# search_counterexample_of_flavias_conjecture()
 
 # first = calculate_thinness(Graph('Q?BwGGF@oN_}@?@??_WGE@?{CBo'))
 # second = calculate_thinness(Graph('W?BwGGF@oN_}@?@??_WGE@?{CBoG??G??C?B@??oG?F__?]'))
