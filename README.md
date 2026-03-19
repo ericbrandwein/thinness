@@ -61,3 +61,13 @@ python -m thinness.para_manu
 
 ## Classification of small graphs
 The minimal graphs for each thinness and proper thinness value for graphs with up to 10 vertices can be found in the CSV files in [data/](data/).
+
+## Common issues
+
+If you're getting this error in Arch Linux when trying to run a python script that imports some sage library:
+
+```
+AttributeError: partially initialized module 'sage.rings.integer_ring' from '/usr/lib/python3.14/site-packages/sage/rings/integer_ring.cpython-314-x86_64-linux-gnu.so' has no attribute 'ZZ' (most likely due to a circular import)
+```
+
+Try putting `from sage import all` at the top of your script. This forces sage to initialize the whole library before running your script.
