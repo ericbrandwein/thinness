@@ -17,7 +17,7 @@ The B&B algorithm is much faster than the other one, but currently does not supp
 - Run `pipenv --site-packages install`
 - Run `pipenv run build` to compile the `.pyx` files
 
-Done! Now you can import the algorithms in any Python script in this directory. For example:
+Done! Now you can import the algorithms in any Python script in this directory. For example, you can put this into a file `thinness/test.py`:
 
 ```
 from sage.graphs.graph_generators import graphs
@@ -27,12 +27,18 @@ for graph in graphs(8):
     print(graph.graph6_string(), calculate_thinness(graph))
 ```
 
+and run it with 
+```bash
+$ pipenv shell
+$ python -m thinness.test
+```
+
 ## Using Docker
 
 If you cannot install the dependencies for some reason (for example, Ubuntu doesn't have Sagemath 10.0 yet), you can use the provided Dockerfile to build a container with all the dependencies. You will need to have Docker and `docker-buildx` installed. In Debian/Ubuntu:
 
 ```
-sudo apt install docker docker-buildx
+sudo snap install docker
 ```
 
 In the root directory of the project, run:
