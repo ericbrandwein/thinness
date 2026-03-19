@@ -60,7 +60,7 @@ python -m thinness.para_manu
 ```
 
 ## Classification of small graphs
-The minimal graphs for each thinness and proper thinness value for graphs with up to 10 vertices can be found in the CSV files in [data/](data/).
+The minimal graphs for each thinness and proper thinness value for graphs with up to 10 vertices can be found in the CSV files in [data/](data/). These were generated with the script [minimal.py](minimal.py).
 
 ## Common issues
 

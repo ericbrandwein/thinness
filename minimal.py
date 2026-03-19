@@ -1,14 +1,15 @@
+from sage import all
 import sys
 from tqdm import tqdm
 from datetime import datetime
 import multiprocessing as mp
 from sage.graphs.graph import Graph
 
-from .helpers import *
-from .data import load_graphs_by_thinness, save_graph_with_thinness, get_last_processed_index, save_last_processed_index
-from .compatibility import build_compatibility_graph
-from .itertools_utils import skip_first
-from .branch_and_bound import calculate_thinness
+from thinness.helpers import *
+from thinness.data import load_graphs_by_thinness, save_graph_with_thinness, get_last_processed_index, save_last_processed_index
+from thinness.compatibility import build_compatibility_graph
+from thinness.itertools_utils import skip_first
+from thinness.branch_and_bound import calculate_thinness
 
 
 GRAPHS_PER_ORDER = [1,1,1,2,6,21,112,853,11117,261080,11716571,1006700565,164059830476,50335907869219,29003487462848061,31397381142761241960,63969560113225176176277,245871831682084026519528568,1787331725248899088890200576580,24636021429399867655322650759681644]
