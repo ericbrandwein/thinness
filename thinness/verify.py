@@ -8,7 +8,8 @@ from .consistent_solution import ConsistentSolution
 def _has_same_vertices(G: Graph, solution: ConsistentSolution):
     vertices = set(G.vertices())
     return vertices == set(solution.order) and len(solution.order) == G.order() and \
-        functools.reduce(set.union, solution.partition, set()) == vertices
+        functools.reduce(set.union, solution.partition, set()) == vertices and \
+        len(functools.reduce(list.__add__, solution.partition, list())) == len(vertices)
 
 
 def verify_solution(G: Graph, solution: ConsistentSolution):
