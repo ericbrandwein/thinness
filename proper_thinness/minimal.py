@@ -3,10 +3,11 @@ import itertools
 from datetime import datetime
 import multiprocessing as mp
 
-from z3_thinness import calculate_proper_thinness_with_z3
-from helpers import *
+from thinness.z3_thinness import calculate_proper_thinness_with_z3
+from thinness.helpers import *
 from data import load_graphs_by_proper_thinness, save_graph_with_proper_thinness, get_last_processed_index, save_last_processed_index
-
+from verify import verify_solution
+from thinness.consistent_solution import ConsistentSolution
 
 GRAPHS_OF_ORDER_10 = 11716571
 GRAPHS_OF_ORDER_9 = 261080
@@ -57,21 +58,6 @@ def skip_processed_graphs(graphs):
     return last_processed
 
 
-def is_consistent_ordered_triple(graph, u, v, w, partition):
-    return not graph.has_edge(u, w) or ((
-        partition[u] != partition[v] or graph.has_edge(v, w)
-    ) and (
-        partition[v] != partition[w] or graph.has_edge(u, v)
-    ))
-
-
-def verify_solution(graph, order, partition):
-    return all(
-        is_consistent_ordered_triple(graph, u, v, w, partition)
-        for u, v, w in itertools.combinations(order, 3)
-    )
-
-
 def fill_csvs_paralelly(n=9):
     graphs_dict = load_graphs_by_proper_thinness(n-1)
     for i in range(n):
@@ -95,5 +81,6 @@ def verify_graphs():
     graphs = load_graphs_by_proper_thinness(9)
     for graph in itertools.chain(*graphs.values()):
         _, order, partition = calculate_proper_thinness_with_z3(graph)
-        assert verify_solution(graph, order, partition), f"Proper thinness for {graph.graph6_string()} was calculated incorrectly!!!!!"
+        solution = ConsistentSolution(order=order, partition=partition)
+        assert verify_solution(graph, solution), f"Proper thinness for {graph.graph6_string()} was calculated incorrectly!!!!!"
     print("All graphs verified")
