@@ -1,3 +1,4 @@
+from sage import all
 from sage.misc.randstate import set_random_seed
 from sage.graphs.graph_generators import graphs
 
