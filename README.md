@@ -50,7 +50,7 @@ sudo docker build -t thinness_sage . # This can take a while, took 8 minutes las
 This will build the image with the name `thinness_sage`. You can then run the container with:
 
 ```bash
-sudo docker run --mount type=bind,source=.,target=/thinness-sage -it thinness_sage
+sudo docker run -p 8080:8080 --mount type=bind,source=.,target=/thinness-sage -it thinness_sage
 ```
 
 Once inside the container, run `pipenv run build` and done! You have a working environment where you can run your scripts. Inside the container try
