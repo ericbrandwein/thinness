@@ -146,6 +146,7 @@ cdef class _Context:
     cdef binary_matrix_t previous_part_neighbors
     cdef binary_matrix_t* parts_for_vertices
     cdef bitset_t suffix_neighbors_of_vertex
+    cdef bitset_t suffix_neighbors_of_other_vertex
     cdef binary_matrix_t part_suffix_neighbors
     cdef binary_matrix_t vertices_not_added
     cdef dict seen_states
@@ -187,6 +188,7 @@ cdef class _Context:
             binary_matrix_init(self.parts_for_vertices[i], n, max_parts)
 
         bitset_init(self.suffix_neighbors_of_vertex, n)
+        bitset_init(self.suffix_neighbors_of_other_vertex, n)
         binary_matrix_init(self.part_suffix_neighbors, max_parts, n)
         binary_matrix_init(self.vertices_not_added, n, n)
 
@@ -218,6 +220,7 @@ cdef class _Context:
                 binary_matrix_free(self.parts_for_vertices[i])
             sig_free(self.parts_for_vertices)
         bitset_free(self.suffix_neighbors_of_vertex)
+        bitset_free(self.suffix_neighbors_of_other_vertex)
         binary_matrix_free(self.part_suffix_neighbors)
         binary_matrix_free(self.vertices_not_added)
         bitset_free(self.canonical_vertices)
@@ -352,7 +355,6 @@ cdef inline int _branch_adding_to_existing_part(
                 part,
                 ctx.parts_for_vertices[level],
                 suffix_vertices,
-                ctx.vertices_not_added.rows[level]
             ):
                 part = bitset_next(parts_for_vertex, part + 1)
                 continue
@@ -423,22 +425,20 @@ cdef inline int _can_other_vertex_be_prepended_freely(
     int part,
     binary_matrix_t parts_for_vertices,
     bitset_t suffix_vertices,
-    bitset_t suffix_neighbors_of_other_vertex,
 ):
     """`vertex` is not in suffix."""
     bitset_intersection(ctx.suffix_neighbors_of_vertex, ctx.graph.rows[vertex], suffix_vertices)
     for other_vertex in bitset_list(suffix_vertices):
         if bitset_in(parts_for_vertices.rows[other_vertex], part):
             bitset_intersection(
-                suffix_neighbors_of_other_vertex,
+                ctx.suffix_neighbors_of_other_vertex,
                 ctx.graph.rows[other_vertex],
                 suffix_vertices
             )
-            if bitset_issubset(suffix_neighbors_of_other_vertex, ctx.suffix_neighbors_of_vertex):
+            if bitset_issubset(ctx.suffix_neighbors_of_other_vertex, ctx.suffix_neighbors_of_vertex):
                 bitset_discard(parts_for_vertices.rows[vertex], part)
                 return True
     return False
-
 
 
 cdef inline int _branch_adding_to_new_part(
@@ -457,24 +457,24 @@ cdef inline int _branch_adding_to_new_part(
     cdef int vertex = bitset_next(vertices, 0)
     while vertex != -1:
         bitset_discard(suffix_vertices, vertex)
-        ctx.prefix[level] = vertex
+            ctx.prefix[level] = vertex
 
-        current_solution = _branch_with_vertex_on_part(
-            ctx,
-            vertex,
-            part,
-            suffix_vertices,
-            parts_used,
-            lower_bound,
-            upper_bound,
-        )
+            current_solution = _branch_with_vertex_on_part(
+                ctx,
+                vertex,
+                part,
+                suffix_vertices,
+                parts_used,
+                lower_bound,
+                upper_bound,
+            )
 
-        if current_solution != -1:
-            best_solution_found = current_solution
-            if best_solution_found <= lower_bound:
-                return best_solution_found
-            else:
-                upper_bound = best_solution_found - 1
+            if current_solution != -1:
+                best_solution_found = current_solution
+                if best_solution_found <= lower_bound:
+                    return best_solution_found
+                else:
+                    upper_bound = best_solution_found - 1
 
         bitset_add(suffix_vertices, vertex)
         vertex = bitset_next(vertices, vertex + 1)
