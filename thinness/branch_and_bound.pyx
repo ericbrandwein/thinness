@@ -455,12 +455,15 @@ cdef inline int _branch_adding_to_new_part(
     cdef int level = _get_level(suffix_vertices)
     cdef int best_solution_found = -1
     cdef int part = parts_used - 1
-    cdef bitset_s* vertices = (
-        &ctx.canonical_vertices[0] if level == 0 else &ctx.vertices_not_added.rows[level][0]
-    )
-    cdef int vertex = bitset_next(vertices, 0)
+    # Vertices discarded by _can_other_vertex_open_new_part_freely are removed from here.
+    cdef bitset_t candidates = ctx.vertices_not_added.rows[level]
+    if level == 0:
+        bitset_copy(candidates, ctx.canonical_vertices)
+    cdef int vertex = bitset_next(candidates, 0)
     while vertex != -1:
         bitset_discard(suffix_vertices, vertex)
+
+        if not _can_other_vertex_open_new_part_freely(ctx, vertex, candidates, suffix_vertices):
             ctx.prefix[level] = vertex
 
             current_solution = _branch_with_vertex_on_part(
@@ -481,9 +484,38 @@ cdef inline int _branch_adding_to_new_part(
                     upper_bound = best_solution_found - 1
 
         bitset_add(suffix_vertices, vertex)
-        vertex = bitset_next(vertices, vertex + 1)
+        vertex = bitset_next(candidates, vertex + 1)
 
     return best_solution_found
+
+
+cdef inline bint _can_other_vertex_open_new_part_freely(
+    _Context ctx,
+    int vertex,
+    bitset_t candidates,
+    bitset_t suffix_vertices,
+):
+    """`vertex` is not in suffix.
+
+    If another candidate for the new part has its suffix neighbors contained in
+    those of `vertex`, then `vertex` is discarded from `candidates`. Only vertices
+    still in `candidates` are considered, so that a vertex that was already
+    discarded can't cause another one to be discarded.
+    """
+    bitset_intersection(ctx.suffix_neighbors_of_vertex, ctx.graph.rows[vertex], suffix_vertices)
+    cdef int other_vertex = bitset_next(candidates, 0)
+    while other_vertex != -1:
+        if other_vertex != vertex:
+            bitset_intersection(
+                ctx.suffix_neighbors_of_other_vertex,
+                ctx.graph.rows[other_vertex],
+                suffix_vertices
+            )
+            if bitset_issubset(ctx.suffix_neighbors_of_other_vertex, ctx.suffix_neighbors_of_vertex):
+                bitset_discard(candidates, vertex)
+                return True
+        other_vertex = bitset_next(candidates, other_vertex + 1)
+    return False
 
 
 cdef inline int _branch_with_vertex_on_part(
