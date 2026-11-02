@@ -327,7 +327,8 @@ cdef inline int _branch_adding_to_existing_part(
     cdef int part
     cdef int vertex
 
-    for vertex in bitset_list(suffix_vertices):
+    vertex = bitset_next(suffix_vertices, 0)
+    while vertex != -1:
         bitset_discard(suffix_vertices, vertex)
         parts_for_vertex = ctx.parts_for_vertices[level].rows[vertex]
         _get_available_parts_for_vertex(
@@ -340,6 +341,7 @@ cdef inline int _branch_adding_to_existing_part(
         if bitset_isempty(parts_for_vertex):
             bitset_add(my_vertices_not_added, vertex)
         bitset_add(suffix_vertices, vertex)
+        vertex = bitset_next(suffix_vertices, vertex + 1)
 
     vertex = bitset_next(suffix_vertices, 0)
     while vertex != -1:
@@ -428,7 +430,8 @@ cdef inline int _can_other_vertex_be_prepended_freely(
 ):
     """`vertex` is not in suffix."""
     bitset_intersection(ctx.suffix_neighbors_of_vertex, ctx.graph.rows[vertex], suffix_vertices)
-    for other_vertex in bitset_list(suffix_vertices):
+    cdef int other_vertex = bitset_next(suffix_vertices, 0)
+    while other_vertex != -1:
         if bitset_in(parts_for_vertices.rows[other_vertex], part):
             bitset_intersection(
                 ctx.suffix_neighbors_of_other_vertex,
@@ -438,6 +441,7 @@ cdef inline int _can_other_vertex_be_prepended_freely(
             if bitset_issubset(ctx.suffix_neighbors_of_other_vertex, ctx.suffix_neighbors_of_vertex):
                 bitset_discard(parts_for_vertices.rows[vertex], part)
                 return True
+        other_vertex = bitset_next(suffix_vertices, other_vertex + 1)
     return False
 
 
