@@ -7,12 +7,15 @@ from cysignals.memory cimport sig_malloc, sig_calloc, sig_free
 from cysignals.signals cimport sig_on, sig_off
 from sage.graphs.graph_decompositions.vertex_separation import vertex_separation
 
+from thinness import branch_and_bound_64
 from thinness.consistent_solution import ConsistentSolution
 from thinness.seen_states cimport SeenStates
 from thinness.vertex_separation import solution_from_vertex_separation
 
 DEFAULT_MAX_PREFIX_LENGTH = 15
 DEFAULT_MAX_SEEN_ENTRIES = 1_000_000
+# Graphs with at most this many vertices are searched with 64-bit words instead of bitsets.
+MAX_VERTICES_FOR_WORDS = branch_and_bound_64.MAX_VERTICES
 
 
 def calculate_thinness(
@@ -101,39 +104,58 @@ def calculate_thinness_of_connected_graph(
         else min(upper_bound, upper_bound_from_vertex_separation)
     )
 
-    cdef int max_branch_and_bound_thinness = upper_bound - 1
-
-    cdef _Context ctx = _Context(
+    search = (
+        branch_and_bound_64.search
+        if graph.order() <= MAX_VERTICES_FOR_WORDS
+        else _search_with_bitsets
+    )
+    branch_and_bound_thinness, best_order, best_partition = search(
         graph,
-        max_branch_and_bound_thinness,
+        lower_bound,
+        upper_bound - 1,
         max_prefix_length,
         max_seen_entries,
     )
 
+    cdef int thinness = branch_and_bound_thinness if branch_and_bound_thinness != -1 else upper_bound
+    cdef list partition
+    if certificate:
+        if branch_and_bound_thinness == -1:
+            return solution_from_vertex_separation(graph, vertex_separation_order)
+        partition = [set() for _ in range(thinness)]
+        for vertex, part in enumerate(best_partition):
+            partition[part].add(vertex)
+        return ConsistentSolution(best_order, partition)
+    else:
+        return thinness
+
+
+def _search_with_bitsets(
+    graph: Graph,
+    int lower_bound,
+    int upper_bound,
+    int max_prefix_length,
+    int max_seen_entries,
+) -> tuple[int, list[int], list[int]]:
+    """Same as `branch_and_bound_64.search`, for graphs of any size."""
+    cdef _Context ctx = _Context(graph, upper_bound, max_prefix_length, max_seen_entries)
+
     sig_on()
-    branch_and_bound_thinness = _branch_and_bound(
+    cdef int solution = _branch_and_bound(
         ctx,
         suffix_vertices=ctx.all_vertices,
         level=0,
         parts_used=0,
         lower_bound=lower_bound,
-        upper_bound=max_branch_and_bound_thinness,
+        upper_bound=upper_bound,
     )
     sig_off()
 
-    cdef int thinness = branch_and_bound_thinness if branch_and_bound_thinness != -1 else upper_bound
-    cdef list order
-    cdef list partition
-    if certificate:
-        if branch_and_bound_thinness == -1:
-            return solution_from_vertex_separation(graph, vertex_separation_order)
-        order = [ctx.best_order[i] for i in range(ctx.n)]
-        partition = [set() for _ in range(thinness)]
-        for vertex in range(ctx.n):
-            partition[ctx.best_partition[vertex]].add(vertex)
-        return ConsistentSolution(order, partition)
-    else:
-        return thinness
+    return (
+        solution,
+        [ctx.best_order[i] for i in range(ctx.n)],
+        [ctx.best_partition[i] for i in range(ctx.n)],
+    )
 
 
 cdef class _Context:
