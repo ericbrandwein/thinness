@@ -149,6 +149,7 @@ cdef class _Context:
     cdef bitset_t suffix_neighbors_of_other_vertex
     cdef binary_matrix_t part_suffix_neighbors
     cdef binary_matrix_t vertices_not_added
+    cdef bitset_t ignored_vertices
     cdef dict seen_states
     cdef int seen_entries
     cdef bitset_t canonical_vertices
@@ -191,6 +192,7 @@ cdef class _Context:
         bitset_init(self.suffix_neighbors_of_other_vertex, n)
         binary_matrix_init(self.part_suffix_neighbors, max_parts, n)
         binary_matrix_init(self.vertices_not_added, n, n)
+        bitset_init(self.ignored_vertices, n)
 
         self.seen_states = dict()
         self.seen_entries = 0
@@ -223,6 +225,7 @@ cdef class _Context:
         bitset_free(self.suffix_neighbors_of_other_vertex)
         binary_matrix_free(self.part_suffix_neighbors)
         binary_matrix_free(self.vertices_not_added)
+        bitset_free(self.ignored_vertices)
         bitset_free(self.canonical_vertices)
         sig_free(self.best_order)
         sig_free(self.best_partition)
@@ -327,19 +330,25 @@ cdef inline int _branch_adding_to_existing_part(
     cdef int part
     cdef int vertex
 
+    bitset_clear(ctx.ignored_vertices)
     vertex = bitset_next(suffix_vertices, 0)
     while vertex != -1:
         bitset_discard(suffix_vertices, vertex)
         parts_for_vertex = ctx.parts_for_vertices[level].rows[vertex]
-        _get_available_parts_for_vertex(
-            ctx,
-            vertex,
-            parts_used,
-            parts_for_vertex,
-            suffix_vertices,
-        )
-        if bitset_isempty(parts_for_vertex):
-            bitset_add(my_vertices_not_added, vertex)
+        if _can_other_vertex_be_prepended_greedily(ctx, vertex, suffix_vertices, parts_used):
+            # Not branched on, neither on an existing part nor on a new one.
+            bitset_add(ctx.ignored_vertices, vertex)
+            bitset_clear(parts_for_vertex)
+        else:
+            _get_available_parts_for_vertex(
+                ctx,
+                vertex,
+                parts_used,
+                parts_for_vertex,
+                suffix_vertices,
+            )
+            if bitset_isempty(parts_for_vertex):
+                bitset_add(my_vertices_not_added, vertex)
         bitset_add(suffix_vertices, vertex)
         vertex = bitset_next(suffix_vertices, vertex + 1)
 
@@ -440,6 +449,40 @@ cdef inline int _can_other_vertex_be_prepended_freely(
             )
             if bitset_issubset(ctx.suffix_neighbors_of_other_vertex, ctx.suffix_neighbors_of_vertex):
                 bitset_discard(parts_for_vertices.rows[vertex], part)
+                return True
+        other_vertex = bitset_next(suffix_vertices, other_vertex + 1)
+    return False
+
+
+cdef inline bint _can_other_vertex_be_prepended_greedily(
+    _Context ctx,
+    int vertex,
+    bitset_t suffix_vertices,
+    int parts_used,
+):
+    """`vertex` is not in suffix.
+
+    Whether there is a neighbor of `vertex` in the suffix that can be added to
+    some part so that the part's suffix neighbors only gain `vertex`. In that
+    case putting that neighbor and then `vertex` is always preferable to putting
+    `vertex` next. This is the same as the neighbor having the same suffix
+    neighbors as the part once `vertex` is removed from the suffix.
+
+    Vertices in `ctx.ignored_vertices` are not considered as the neighbor, so
+    that two vertices can't cause each other to be ignored.
+    """
+    cdef bint is_greedy
+    cdef int other_vertex = bitset_next(suffix_vertices, 0)
+    while other_vertex != -1:
+        if (
+            bitset_in(ctx.graph.rows[vertex], other_vertex)
+            and not bitset_in(ctx.ignored_vertices, other_vertex)
+        ):
+            bitset_discard(suffix_vertices, other_vertex)
+            is_greedy = _find_greedy_part_for_vertex(
+                ctx, other_vertex, suffix_vertices, parts_used) != -1
+            bitset_add(suffix_vertices, other_vertex)
+            if is_greedy:
                 return True
         other_vertex = bitset_next(suffix_vertices, other_vertex + 1)
     return False
