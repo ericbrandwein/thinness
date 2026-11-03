@@ -21,19 +21,19 @@ def calculate_thinness(
     lower_bound: int = 1, 
     upper_bound: int = None,
     certificate: bool = False, 
-    max_prefix_length: int = DEFAULT_MAX_PREFIX_LENGTH, 
-    max_seen_entries: int = DEFAULT_MAX_SEEN_ENTRIES
+    max_prefix_length: int = DEFAULT_MAX_PREFIX_LENGTH,
+    max_seen_entries: int = DEFAULT_MAX_SEEN_ENTRIES,
 ) -> ConsistentSolution | int:
     components = [graph.subgraph(component, immutable=False) for component in graph.connected_components(sort=False)]
     relabellings = [component.relabel(return_map=True) for component in components]
     solutions = [
         calculate_thinness_of_connected_graph(
-            component, 
-            lower_bound, 
+            component,
+            lower_bound,
             upper_bound,
-            certificate, 
-            max_prefix_length, 
-            max_seen_entries
+            certificate,
+            max_prefix_length,
+            max_seen_entries,
         ) for component in components
     ]
 
@@ -78,7 +78,7 @@ def calculate_thinness_of_connected_graph(
     upper_bound: int = None,
     certificate: bool = False,
     max_prefix_length: int = DEFAULT_MAX_PREFIX_LENGTH,
-    max_seen_entries: int = DEFAULT_MAX_SEEN_ENTRIES
+    max_seen_entries: int = DEFAULT_MAX_SEEN_ENTRIES,
 ) -> ConsistentSolution | int:
     """upper_bound is exclusive."""
     vertex_separation_value, vertex_separation_order = vertex_separation(graph)
@@ -100,7 +100,7 @@ def calculate_thinness_of_connected_graph(
         graph,
         max_branch_and_bound_thinness,
         max_prefix_length,
-        max_seen_entries
+        max_seen_entries,
     )
 
     sig_on()
@@ -149,6 +149,7 @@ cdef class _Context:
     cdef bitset_t suffix_neighbors_of_other_vertex
     cdef binary_matrix_t part_suffix_neighbors
     cdef binary_matrix_t vertices_not_added
+    cdef binary_matrix_t unlockers
     cdef bitset_t ignored_vertices
     cdef dict seen_states
     cdef int seen_entries
@@ -163,7 +164,7 @@ cdef class _Context:
         graph: Graph,
         int max_parts,
         int max_prefix_length,
-        int max_seen_entries
+        int max_seen_entries,
     ):
         dense_graph_init(self.graph, graph)
 
@@ -192,6 +193,7 @@ cdef class _Context:
         bitset_init(self.suffix_neighbors_of_other_vertex, n)
         binary_matrix_init(self.part_suffix_neighbors, max_parts, n)
         binary_matrix_init(self.vertices_not_added, n, n)
+        binary_matrix_init(self.unlockers, n, n)
         bitset_init(self.ignored_vertices, n)
 
         self.seen_states = dict()
@@ -225,6 +227,7 @@ cdef class _Context:
         bitset_free(self.suffix_neighbors_of_other_vertex)
         binary_matrix_free(self.part_suffix_neighbors)
         binary_matrix_free(self.vertices_not_added)
+        binary_matrix_free(self.unlockers)
         bitset_free(self.ignored_vertices)
         bitset_free(self.canonical_vertices)
         sig_free(self.best_order)
@@ -330,27 +333,28 @@ cdef inline int _branch_adding_to_existing_part(
     cdef int part
     cdef int vertex
 
-    bitset_clear(ctx.ignored_vertices)
+    vertex = bitset_next(suffix_vertices, 0)
+    while vertex != -1:
+        bitset_clear(ctx.unlockers.rows[vertex])
+        vertex = bitset_next(suffix_vertices, vertex + 1)
+
     vertex = bitset_next(suffix_vertices, 0)
     while vertex != -1:
         bitset_discard(suffix_vertices, vertex)
         parts_for_vertex = ctx.parts_for_vertices[level].rows[vertex]
-        if _can_other_vertex_be_prepended_greedily(ctx, vertex, suffix_vertices, parts_used):
-            # Not branched on, neither on an existing part nor on a new one.
-            bitset_add(ctx.ignored_vertices, vertex)
-            bitset_clear(parts_for_vertex)
-        else:
-            _get_available_parts_for_vertex(
-                ctx,
-                vertex,
-                parts_used,
-                parts_for_vertex,
-                suffix_vertices,
-            )
-            if bitset_isempty(parts_for_vertex):
-                bitset_add(my_vertices_not_added, vertex)
+        _get_available_parts_for_vertex(
+            ctx,
+            vertex,
+            parts_used,
+            parts_for_vertex,
+            suffix_vertices,
+        )
+        if bitset_isempty(parts_for_vertex):
+            bitset_add(my_vertices_not_added, vertex)
         bitset_add(suffix_vertices, vertex)
         vertex = bitset_next(suffix_vertices, vertex + 1)
+
+    _ignore_unlocked_vertices(ctx, level, suffix_vertices, my_vertices_not_added)
 
     vertex = bitset_next(suffix_vertices, 0)
     while vertex != -1:
@@ -401,7 +405,14 @@ cdef inline void _get_available_parts_for_vertex(
     bitset_s* parts_for_vertex,
     bitset_t suffix_vertices,
 ):
+    """`vertex` is not in suffix.
+
+    Also records in `ctx.unlockers` the vertices that `vertex` unlocks, see
+    `_ignore_unlocked_vertices`.
+    """
     bitset_intersection(ctx.suffix_neighbors_of_vertex, ctx.graph.rows[vertex], suffix_vertices)
+    cdef long suffix_degree = bitset_len(ctx.suffix_neighbors_of_vertex)
+    cdef long unlocked_vertex
 
     bitset_clear(parts_for_vertex)
     for part in range(parts_used):
@@ -412,6 +423,14 @@ cdef inline void _get_available_parts_for_vertex(
         )
         if bitset_issubset(ctx.part_suffix_neighbors.rows[part], ctx.suffix_neighbors_of_vertex):
             bitset_add(parts_for_vertex, part)
+            if bitset_len(ctx.part_suffix_neighbors.rows[part]) == suffix_degree - 1:
+                bitset_difference(
+                    ctx.suffix_neighbors_of_other_vertex,
+                    ctx.suffix_neighbors_of_vertex,
+                    ctx.part_suffix_neighbors.rows[part]
+                )
+                unlocked_vertex = bitset_first(ctx.suffix_neighbors_of_other_vertex)
+                bitset_add(ctx.unlockers.rows[unlocked_vertex], vertex)
 
     for part in range(parts_used):
         if bitset_in(parts_for_vertex, part):
@@ -454,38 +473,30 @@ cdef inline int _can_other_vertex_be_prepended_freely(
     return False
 
 
-cdef inline bint _can_other_vertex_be_prepended_greedily(
+cdef inline void _ignore_unlocked_vertices(
     _Context ctx,
-    int vertex,
+    int level,
     bitset_t suffix_vertices,
-    int parts_used,
+    bitset_t vertices_not_added,
 ):
-    """`vertex` is not in suffix.
+    """Remove from this level's candidates the vertices that some other vertex unlocks.
 
-    Whether there is a neighbor of `vertex` in the suffix that can be added to
-    some part so that the part's suffix neighbors only gain `vertex`. In that
-    case putting that neighbor and then `vertex` is always preferable to putting
-    `vertex` next. This is the same as the neighbor having the same suffix
-    neighbors as the part once `vertex` is removed from the suffix.
+    A vertex `u` unlocks `v` if `u` can be added to some part so that the part's
+    suffix neighbors only gain `v`. In that case putting `u` and then `v` is
+    always preferable to putting `v` next, so `v` is not branched on, neither on
+    an existing part nor on a new one.
 
-    Vertices in `ctx.ignored_vertices` are not considered as the neighbor, so
-    that two vertices can't cause each other to be ignored.
+    Vertices already ignored don't unlock others, so that two vertices can't
+    cause each other to be ignored.
     """
-    cdef bint is_greedy
-    cdef int other_vertex = bitset_next(suffix_vertices, 0)
-    while other_vertex != -1:
-        if (
-            bitset_in(ctx.graph.rows[vertex], other_vertex)
-            and not bitset_in(ctx.ignored_vertices, other_vertex)
-        ):
-            bitset_discard(suffix_vertices, other_vertex)
-            is_greedy = _find_greedy_part_for_vertex(
-                ctx, other_vertex, suffix_vertices, parts_used) != -1
-            bitset_add(suffix_vertices, other_vertex)
-            if is_greedy:
-                return True
-        other_vertex = bitset_next(suffix_vertices, other_vertex + 1)
-    return False
+    bitset_clear(ctx.ignored_vertices)
+    cdef int vertex = bitset_next(suffix_vertices, 0)
+    while vertex != -1:
+        if not bitset_issubset(ctx.unlockers.rows[vertex], ctx.ignored_vertices):
+            bitset_add(ctx.ignored_vertices, vertex)
+            bitset_clear(ctx.parts_for_vertices[level].rows[vertex])
+            bitset_discard(vertices_not_added, vertex)
+        vertex = bitset_next(suffix_vertices, vertex + 1)
 
 
 cdef inline int _branch_adding_to_new_part(
