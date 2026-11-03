@@ -8,6 +8,7 @@ from cysignals.signals cimport sig_on, sig_off
 from sage.graphs.graph_decompositions.vertex_separation import vertex_separation
 
 from thinness.consistent_solution import ConsistentSolution
+from thinness.seen_states cimport SeenStates
 from thinness.vertex_separation import solution_from_vertex_separation
 
 DEFAULT_MAX_PREFIX_LENGTH = 15
@@ -161,7 +162,7 @@ cdef class _Context:
     cdef binary_matrix_t vertices_not_added
     cdef binary_matrix_t unlockers
     cdef bitset_t ignored_vertices
-    cdef set seen_states
+    cdef SeenStates seen_states
     cdef bitset_t canonical_vertices
     cdef int* best_order
     cdef int* best_partition
@@ -205,7 +206,7 @@ cdef class _Context:
         binary_matrix_init(self.unlockers, n, n)
         bitset_init(self.ignored_vertices, n)
 
-        self.seen_states = set()
+        self.seen_states = SeenStates(self.all_vertices.limbs, max_parts, max_seen_entries)
 
         bitset_init(self.canonical_vertices, n)
         _build_canonical_vertices(graph, self.canonical_vertices)
@@ -766,25 +767,11 @@ cdef inline bint _check_state_seen(
     """
     if level > ctx.max_prefix_length:
         return False
-
-    cdef int part
-    cdef list part_keys = [
-        _bitset_bytes(ctx.part_suffix_neighbors[level].rows[part])
-        for part in range(parts_used)
-    ]
-    part_keys.sort()
-    cdef bytes state = _bitset_bytes(suffix_vertices) + b''.join(part_keys)
-
-    if state in ctx.seen_states:
-        return True
-    if len(ctx.seen_states) < ctx.max_seen_entries:
-        ctx.seen_states.add(state)
-    return False
-
-
-cdef inline bytes _bitset_bytes(bitset_t bitset):
-    """All bitsets of the same size give bytes of the same length."""
-    return (<char*>bitset.bits)[:bitset.limbs * LIMB_SIZE]
+    return ctx.seen_states.contains_or_add(
+        suffix_vertices,
+        ctx.part_suffix_neighbors[level].rows,
+        parts_used,
+    )
 
 
 cdef inline void _update_part_neighbors(
