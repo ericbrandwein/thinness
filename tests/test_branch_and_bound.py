@@ -61,6 +61,39 @@ class TestBranchAndBound(unittest.TestCase):
             with self.subTest(graph=graph.graph6_string()):
                 self._assert_thinness_of_graph(graph, thinness)
 
+    def test_thinness_of_random_graphs_against_reference(self):
+        set_random_seed(0)
+        for n in range(9, 14):
+            for density in [0.2, 0.5, 0.8]:
+                for _ in range(10):
+                    graph = graphs.RandomGNP(n, density)
+                    thinness = reference_thinness(graph)
+                    with self.subTest(graph=graph.graph6_string()):
+                        self._assert_thinness_of_graph(graph, thinness)
+                        self.assertEqual(calculate_thinness(graph, max_seen_entries=0), thinness)
+
+    def test_upper_bound_of_random_graphs(self):
+        set_random_seed(0)
+        for _ in range(20):
+            graph = graphs.RandomGNP(11, 0.6)
+            thinness = reference_thinness(graph)
+            with self.subTest(graph=graph.graph6_string()):
+                self.assertEqual(calculate_thinness(graph, upper_bound=thinness + 1), thinness)
+                self.assertEqual(calculate_thinness(graph, upper_bound=thinness), thinness)
+
+    def test_thinness_of_disconnected_graphs(self):
+        # The largest component doesn't have the largest thinness.
+        self._assert_thinness_of_graph(graphs.PathGraph(10) + crown_graph(4), 3)
+        self._assert_thinness_of_graph(crown_graph(4) + graphs.PathGraph(10) + crown_graph(3), 3)
+
+    def test_thinness_of_random_disconnected_graphs(self):
+        set_random_seed(0)
+        for _ in range(20):
+            graph = graphs.RandomGNP(8, 0.6) + graphs.RandomGNP(6, 0.5) + graphs.RandomGNP(4, 0.7)
+            thinness = reference_thinness(graph)
+            with self.subTest(graph=graph.graph6_string()):
+                self._assert_thinness_of_graph(graph, thinness)
+
     def test_thinness_of_join(self):
         graph = Graph('GCOf?w')
         self._assert_thinness_of_graph(graph, 2)
@@ -80,3 +113,50 @@ def crown_graph(vertices_per_side: int) -> Graph:
     for u, v in itertools.permutations(range(vertices_per_side), 2):
         graph.add_edge(u, v + vertices_per_side)
     return graph
+
+
+def reference_thinness(graph: Graph) -> int:
+    """Thinness computed by a plain search without any of the pruning rules of the branch and bound.
+
+    Builds the order vertex by vertex, trying every vertex of the suffix on every
+    part it can be added to. Only remembers the states already searched, where a
+    state is the suffix and the suffix neighbors of each part.
+    """
+    graph = graph.relabel(inplace=False)
+    n = graph.order()
+    neighbors = [sum(1 << neighbor for neighbor in graph.neighbor_iterator(vertex)) for vertex in range(n)]
+    for max_parts in itertools.count(1):
+        if _has_consistent_solution(n, neighbors, max_parts):
+            return max_parts
+
+
+def _has_consistent_solution(n: int, neighbors: list[int], max_parts: int) -> bool:
+    seen_states = set()
+
+    def extend(suffix: int, part_neighbors: tuple[int, ...]) -> bool:
+        if suffix == 0:
+            return True
+        if (suffix, part_neighbors) in seen_states:
+            return False
+        seen_states.add((suffix, part_neighbors))
+        for vertex in range(n):
+            if not suffix >> vertex & 1:
+                continue
+            new_suffix = suffix & ~(1 << vertex)
+            vertex_neighbors = neighbors[vertex] & new_suffix
+            new_part_neighbors = [neighbors_of_part & new_suffix for neighbors_of_part in part_neighbors]
+            for part in range(len(part_neighbors) + 1):
+                if part == len(part_neighbors):
+                    if part == max_parts:
+                        continue
+                    parts = new_part_neighbors + [vertex_neighbors]
+                elif new_part_neighbors[part] & ~vertex_neighbors == 0:
+                    parts = list(new_part_neighbors)
+                    parts[part] = vertex_neighbors
+                else:
+                    continue
+                if extend(new_suffix, tuple(sorted(parts))):
+                    return True
+        return False
+
+    return extend((1 << n) - 1, ())
