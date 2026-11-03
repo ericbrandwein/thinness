@@ -1,10 +1,12 @@
 import unittest
+import unittest.mock
 import itertools
 
 from sage.graphs.graph import Graph
 from sage.graphs.graph_generators import graphs
 from sage.misc.randstate import set_random_seed
 
+from thinness import branch_and_bound
 from thinness.branch_and_bound import calculate_thinness
 from thinness.z3 import Z3ThinnessSolver
 from thinness.verify import verify_solution
@@ -93,6 +95,21 @@ class TestBranchAndBound(unittest.TestCase):
             thinness = reference_thinness(graph)
             with self.subTest(graph=graph.graph6_string()):
                 self._assert_thinness_of_graph(graph, thinness)
+
+    def test_thinness_of_random_graphs_with_bitsets_against_reference(self):
+        # Graphs this small are searched with 64-bit words, so force the search with bitsets.
+        set_random_seed(0)
+        with unittest.mock.patch.object(branch_and_bound, 'MAX_VERTICES_FOR_WORDS', 0):
+            for n in range(9, 12):
+                for density in [0.2, 0.5, 0.8]:
+                    for _ in range(5):
+                        graph = graphs.RandomGNP(n, density)
+                        thinness = reference_thinness(graph)
+                        with self.subTest(graph=graph.graph6_string()):
+                            self._assert_thinness_of_graph(graph, thinness)
+
+    def test_thinness_of_graph_with_more_than_64_vertices(self):
+        self._assert_thinness_of_graph(graphs.CycleGraph(70), 2)
 
     def test_thinness_of_join(self):
         graph = Graph('GCOf?w')
