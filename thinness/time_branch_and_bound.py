@@ -32,7 +32,7 @@ def crown_graph(vertices_per_side: int) -> Graph:
 
 
 def time_crown_graphs():
-    for n in range(2, 20):
+    for n in range(2, 13):
         graph = crown_graph(n)
         print(textwrap.indent(
             text=f'{n}:\t{time_calculation(graph)}',
@@ -174,7 +174,7 @@ if __name__ == '__main__':
 
     # thinness_of_combination_graphs()
 
-    thinness_of_some_graphs()
+    # thinness_of_some_graphs()
 
     
     

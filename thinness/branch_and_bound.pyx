@@ -2,14 +2,13 @@ import itertools
 from multiset import Multiset, FrozenMultiset
 
 from sage.graphs.graph import Graph
-from sage.data_structures.bitset import Bitset
 from sage.data_structures.binary_matrix cimport *
 from sage.graphs.base.static_dense_graph cimport dense_graph_init
 from cysignals.memory cimport sig_malloc, sig_calloc, sig_free
-from cysignals.signals cimport sig_on, sig_off 
+from cysignals.signals cimport sig_on, sig_off
 from sage.graphs.graph_decompositions.vertex_separation import vertex_separation
 
-from thinness.consistent_solution import ConsistentSolution 
+from thinness.consistent_solution import ConsistentSolution
 from thinness.vertex_separation import solution_from_vertex_separation
 
 DEFAULT_MAX_PREFIX_LENGTH = 15
@@ -17,10 +16,10 @@ DEFAULT_MAX_SEEN_ENTRIES = 1_000_000
 
 
 def calculate_thinness(
-    graph: Graph, 
-    lower_bound: int = 1, 
+    graph: Graph,
+    lower_bound: int = 1,
     upper_bound: int = None,
-    certificate: bool = False, 
+    certificate: bool = False,
     max_prefix_length: int = DEFAULT_MAX_PREFIX_LENGTH,
     max_seen_entries: int = DEFAULT_MAX_SEEN_ENTRIES,
 ) -> ConsistentSolution | int:
@@ -44,32 +43,32 @@ def calculate_thinness(
 
 
 def _join_solutions(solutions: list[ConsistentSolution], relabellings: list[dict]) -> ConsistentSolution:
-    order = _join_orders([solution.order for solution in solutions], relabellings)
-    partition = _join_partitions([solution.partition for solution in solutions], relabellings)
+    original_labels = [
+        {new_label: original_label for original_label, new_label in relabelling.items()}
+        for relabelling in relabellings
+    ]
+    order = _join_orders([solution.order for solution in solutions], original_labels)
+    partition = _join_partitions([solution.partition for solution in solutions], original_labels)
     return ConsistentSolution(order, partition)
 
 
-def _join_orders(orders: list[list[int]], relabellings: list[dict]) -> list[int]:
+def _join_orders(orders: list[list[int]], original_labels: list[dict]) -> list[int]:
     orders = [
-        [_original_label(vertex, relabellings[i]) for vertex in order]
+        [original_labels[i][vertex] for vertex in order]
         for i, order in enumerate(orders)
     ]
     return list(itertools.chain.from_iterable(orders))
 
 
-def _join_partitions(partitions: list[list[set]], relabellings: list[dict]) -> list[set]:
+def _join_partitions(partitions: list[list[set]], original_labels: list[dict]) -> list[set]:
     partitions = [
-        [set(_original_label(vertex, relabellings[i]) for vertex in part) for part in partition]
+        [set(original_labels[i][vertex] for vertex in part) for part in partition]
         for i, partition in enumerate(partitions)
     ]
     return [
         set(itertools.chain.from_iterable(parts))
         for parts in itertools.zip_longest(*partitions, fillvalue=set())
     ]
-
-
-def _original_label(vertex: int, relabelling: dict):
-    return next(key for key, value in relabelling.items() if value == vertex)
 
 
 def calculate_thinness_of_connected_graph(
@@ -107,6 +106,7 @@ def calculate_thinness_of_connected_graph(
     branch_and_bound_thinness = _branch_and_bound(
         ctx,
         suffix_vertices=ctx.all_vertices,
+        level=0,
         parts_used=0,
         lower_bound=lower_bound,
         upper_bound=max_branch_and_bound_thinness,
@@ -138,7 +138,6 @@ cdef class _Context:
     cdef binary_matrix_t graph
     cdef int* prefix
     cdef int* part_of
-    cdef int* parts_rename
     cdef bitset_t all_vertices
     cdef bitset_t prefix_vertices
     cdef binary_matrix_t new_suffixes
@@ -174,7 +173,6 @@ cdef class _Context:
 
         self.prefix = <int*>sig_malloc(sizeof(int) * n)
         self.part_of = <int*>sig_malloc(sizeof(int) * n)
-        self.parts_rename = <int*>sig_malloc(sizeof(int) * max_parts)
 
         bitset_init(self.all_vertices, n)
         bitset_complement(self.all_vertices, self.all_vertices)
@@ -213,7 +211,6 @@ cdef class _Context:
         binary_matrix_free(self.graph)
         sig_free(self.prefix)
         sig_free(self.part_of)
-        sig_free(self.parts_rename)
         bitset_free(self.all_vertices)
         bitset_free(self.prefix_vertices)
         binary_matrix_free(self.new_suffixes)
@@ -243,53 +240,60 @@ cdef inline void _build_canonical_vertices(graph: Graph, bitset_t canonical_vert
 cdef int _branch_and_bound(
     _Context ctx,
     bitset_t suffix_vertices,
+    int level,
     int parts_used,
     int lower_bound,
     int upper_bound,
 ):
-    """upper_bound is inclusive"""
-    cdef int level = _get_level(suffix_vertices)
+    """Search for a solution that extends the current prefix.
 
+    `level` is the length of the prefix. Both bounds are inclusive: only
+    solutions with at most `upper_bound` parts are searched for, and the search
+    stops as soon as one with at most `lower_bound` parts is found. Returns the
+    number of parts of the best solution found, which is stored in
+    `ctx.best_order` and `ctx.best_partition`, or -1 if none was found.
+    """
     cdef bitset_t new_suffix = ctx.new_suffixes.rows[level]
     bitset_copy(new_suffix, suffix_vertices)
 
-    _increment_prefix_greedily_on_existing_parts(ctx, new_suffix, parts_used)
+    level = _increment_prefix_greedily_on_existing_parts(ctx, new_suffix, level, parts_used)
 
     if bitset_isempty(new_suffix) and parts_used <= upper_bound:
         _copy_array(ctx.n, ctx.prefix, ctx.best_order)
         _copy_array(ctx.n, ctx.part_of, ctx.best_partition)
         return parts_used
 
-    if _check_state_seen(ctx, new_suffix, parts_used):
+    if _check_state_seen(ctx, new_suffix, level, parts_used):
         return -1
 
-    cdef int best_solution_found = _branch_adding_to_existing_part(
-        ctx,
-        new_suffix,
-        parts_used,
+    cdef int best_solution_found = -1
+    if _update_best_solution(
+        _branch_adding_to_existing_part(
+            ctx,
+            new_suffix,
+            level,
+            parts_used,
+            lower_bound,
+            upper_bound,
+        ),
         lower_bound,
-        upper_bound,
-    )
-
-    if best_solution_found != -1:
-        if best_solution_found <= lower_bound:
-            return best_solution_found
-        else:
-            upper_bound = best_solution_found - 1
+        &best_solution_found,
+        &upper_bound,
+    ):
+        return best_solution_found
 
     cdef int new_part_solution
     cdef int part
-    cdef int vertex_added_on_new_part
     if parts_used < upper_bound:
         parts_used += 1
         part = parts_used - 1
         lower_bound = max(lower_bound, parts_used)
-        vertex_added_on_new_part = _add_vertex_to_prefix_greedily_on_part(ctx, part, new_suffix)
 
-        if vertex_added_on_new_part:
+        if _add_vertex_to_prefix_greedily_on_part(ctx, part, new_suffix, level):
             new_part_solution = _branch_and_bound(
                 ctx,
                 new_suffix,
+                level + 1,
                 parts_used,
                 lower_bound,
                 upper_bound,
@@ -298,6 +302,7 @@ cdef int _branch_and_bound(
             new_part_solution = _branch_adding_to_new_part(
                 ctx,
                 new_suffix,
+                level,
                 parts_used,
                 lower_bound,
                 upper_bound,
@@ -309,11 +314,27 @@ cdef int _branch_and_bound(
     return best_solution_found
 
 
-cdef inline int _get_level(bitset_t suffix_vertices):
-    return suffix_vertices.size - bitset_len(suffix_vertices)
+cdef inline bint _update_best_solution(
+    int solution,
+    int lower_bound,
+    int* best_solution_found,
+    int* upper_bound,
+):
+    """Record `solution` if one was found and tighten `upper_bound` to look for a better one.
+
+    Returns whether the search can stop because `solution` reaches `lower_bound`.
+    """
+    if solution == -1:
+        return False
+    best_solution_found[0] = solution
+    if solution <= lower_bound:
+        return True
+    upper_bound[0] = solution - 1
+    return False
 
 
 cdef inline void _copy_array(int n, int* array_from, int* array_to):
+    cdef int i
     for i in range(n):
         array_to[i] = array_from[i]
 
@@ -321,11 +342,11 @@ cdef inline void _copy_array(int n, int* array_from, int* array_to):
 cdef inline int _branch_adding_to_existing_part(
     _Context ctx,
     bitset_t suffix_vertices,
+    int level,
     int parts_used,
     int lower_bound,
     int upper_bound,
 ):
-    cdef int level = _get_level(suffix_vertices)
     cdef bitset_t my_vertices_not_added = ctx.vertices_not_added.rows[level]
     bitset_clear(my_vertices_not_added)
     cdef int best_solution_found = -1
@@ -359,37 +380,32 @@ cdef inline int _branch_adding_to_existing_part(
     vertex = bitset_next(suffix_vertices, 0)
     while vertex != -1:
         bitset_discard(suffix_vertices, vertex)
-        ctx.prefix[level] = vertex
 
         parts_for_vertex = ctx.parts_for_vertices[level].rows[vertex]
         part = bitset_next(parts_for_vertex, 0)
         while part != -1:
-            if _can_other_vertex_be_prepended_freely(
+            if not _can_other_vertex_be_prepended_freely(
                 ctx,
                 vertex,
                 part,
                 ctx.parts_for_vertices[level],
                 suffix_vertices,
-            ):
-                part = bitset_next(parts_for_vertex, part + 1)
-                continue
-
-            current_solution = _branch_with_vertex_on_part(
-                ctx,
-                vertex,
-                part,
-                suffix_vertices,
-                parts_used,
+            ) and _update_best_solution(
+                _branch_with_vertex_on_part(
+                    ctx,
+                    vertex,
+                    part,
+                    suffix_vertices,
+                    level,
+                    parts_used,
+                    lower_bound,
+                    upper_bound,
+                ),
                 lower_bound,
-                upper_bound,
-            )
-
-            if current_solution != -1:
-                best_solution_found = current_solution
-                if best_solution_found <= lower_bound:
-                    return best_solution_found
-                else:
-                    upper_bound = best_solution_found - 1
+                &best_solution_found,
+                &upper_bound,
+            ):
+                return best_solution_found
             part = bitset_next(parts_for_vertex, part + 1)
 
         bitset_add(suffix_vertices, vertex)
@@ -502,11 +518,11 @@ cdef inline void _ignore_unlocked_vertices(
 cdef inline int _branch_adding_to_new_part(
     _Context ctx,
     bitset_t suffix_vertices,
+    int level,
     int parts_used,
     int lower_bound,
     int upper_bound,
 ):
-    cdef int level = _get_level(suffix_vertices)
     cdef int best_solution_found = -1
     cdef int part = parts_used - 1
     # Vertices discarded by _can_other_vertex_open_new_part_freely are removed from here.
@@ -517,25 +533,27 @@ cdef inline int _branch_adding_to_new_part(
     while vertex != -1:
         bitset_discard(suffix_vertices, vertex)
 
-        if not _can_other_vertex_open_new_part_freely(ctx, vertex, candidates, suffix_vertices):
-            ctx.prefix[level] = vertex
-
-            current_solution = _branch_with_vertex_on_part(
+        if not _can_other_vertex_open_new_part_freely(
+            ctx,
+            vertex,
+            candidates,
+            suffix_vertices,
+        ) and _update_best_solution(
+            _branch_with_vertex_on_part(
                 ctx,
                 vertex,
                 part,
                 suffix_vertices,
+                level,
                 parts_used,
                 lower_bound,
                 upper_bound,
-            )
-
-            if current_solution != -1:
-                best_solution_found = current_solution
-                if best_solution_found <= lower_bound:
-                    return best_solution_found
-                else:
-                    upper_bound = best_solution_found - 1
+            ),
+            lower_bound,
+            &best_solution_found,
+            &upper_bound,
+        ):
+            return best_solution_found
 
         bitset_add(suffix_vertices, vertex)
         vertex = bitset_next(candidates, vertex + 1)
@@ -577,10 +595,13 @@ cdef inline int _branch_with_vertex_on_part(
     int vertex,
     int part,
     bitset_t suffix_vertices,
+    int level,
     int parts_used,
     int lower_bound,
     int upper_bound,
 ):
+    """`vertex` is not in suffix."""
+    ctx.prefix[level] = vertex
     ctx.part_of[vertex] = part
 
     _update_part_neighbors(
@@ -592,6 +613,7 @@ cdef inline int _branch_with_vertex_on_part(
     cdef int solution = _branch_and_bound(
         ctx,
         suffix_vertices,
+        level + 1,
         parts_used,
         lower_bound,
         upper_bound,
@@ -605,13 +627,16 @@ cdef inline int _branch_with_vertex_on_part(
     return solution
 
 
-cdef inline void _increment_prefix_greedily_on_existing_parts(
+cdef inline int _increment_prefix_greedily_on_existing_parts(
     _Context ctx,
     bitset_t suffix_vertices,
+    int level,
     int parts_used,
 ):
-    """Add to prefix all vertices that have the same suffix neighbors as one of the parts."""
-    cdef int level = _get_level(suffix_vertices)
+    """Add to prefix all vertices that have the same suffix neighbors as one of the parts.
+
+    Returns the new length of the prefix.
+    """
     cdef int vertex
     cdef int part
     cdef bint suffix_changed = True
@@ -633,13 +658,15 @@ cdef inline void _increment_prefix_greedily_on_existing_parts(
 
             vertex = bitset_next(suffix_vertices, vertex + 1)
 
+    return level
+
 
 cdef inline bint _add_vertex_to_prefix_greedily_on_part(
     _Context ctx,
     int part,
     bitset_t suffix_vertices,
+    int level,
 ):
-    cdef int level = _get_level(suffix_vertices)
     cdef bint can_be_added
     cdef int vertex = bitset_next(suffix_vertices, 0)
     while vertex != -1:
@@ -696,13 +723,13 @@ cdef inline bint _is_greedy_part_for_vertex(
 cdef inline bint _check_state_seen(
     _Context ctx,
     bitset_t suffix_vertices,
+    int level,
     int parts_used,
 ):
-    bitset_complement(ctx.prefix_vertices, suffix_vertices)
-    cdef int prefix_len = bitset_len(ctx.prefix_vertices)
-    if prefix_len > ctx.max_prefix_length:
+    if level > ctx.max_prefix_length:
         return False
 
+    bitset_complement(ctx.prefix_vertices, suffix_vertices)
     cdef frozenset frozen_prefix_vertices = frozenset(bitset_list(ctx.prefix_vertices))
     frozen_part_neighbors = _build_frozen_part_neighbors(ctx, suffix_vertices, parts_used)
     cdef set seen_part_neighbors
