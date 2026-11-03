@@ -156,8 +156,6 @@ cdef class _Context:
     cdef binary_matrix_t* vertex_suffix_neighbors
     cdef binary_matrix_t* part_suffix_neighbors
     cdef binary_matrix_t* parts_for_vertices
-    cdef bitset_t suffix_neighbors_of_vertex
-    cdef bitset_t suffix_neighbors_of_part
     cdef bitset_t unlocked_vertices
     cdef binary_matrix_t vertices_not_added
     cdef binary_matrix_t unlockers
@@ -192,15 +190,14 @@ cdef class _Context:
         binary_matrix_init(self.previous_part_neighbors, n, n)
 
         # Zeroed so that __dealloc__ can free them even if an init below fails.
-        self.vertex_suffix_neighbors = <binary_matrix_t*>sig_calloc(n, sizeof(binary_matrix_t))
-        self.part_suffix_neighbors = <binary_matrix_t*>sig_calloc(n, sizeof(binary_matrix_t))
+        # One more level for the suffix neighbors, as the greedy step of a node starts with them.
+        self.vertex_suffix_neighbors = <binary_matrix_t*>sig_calloc(n + 1, sizeof(binary_matrix_t))
+        self.part_suffix_neighbors = <binary_matrix_t*>sig_calloc(n + 1, sizeof(binary_matrix_t))
         self.parts_for_vertices = <binary_matrix_t*>sig_calloc(n, sizeof(binary_matrix_t))
-        _init_matrices(self.vertex_suffix_neighbors, n, n, n)
-        _init_matrices(self.part_suffix_neighbors, n, max_parts, n)
+        _init_matrices(self.vertex_suffix_neighbors, n + 1, n, n)
+        _init_matrices(self.part_suffix_neighbors, n + 1, max_parts, n)
         _init_matrices(self.parts_for_vertices, n, n, max_parts)
 
-        bitset_init(self.suffix_neighbors_of_vertex, n)
-        bitset_init(self.suffix_neighbors_of_part, n)
         bitset_init(self.unlocked_vertices, n)
         binary_matrix_init(self.vertices_not_added, n, n)
         binary_matrix_init(self.unlockers, n, n)
@@ -225,11 +222,9 @@ cdef class _Context:
         binary_matrix_free(self.new_suffixes)
         binary_matrix_free(self.part_neighbors)
         binary_matrix_free(self.previous_part_neighbors)
-        _free_matrices(self.vertex_suffix_neighbors, self.n)
-        _free_matrices(self.part_suffix_neighbors, self.n)
+        _free_matrices(self.vertex_suffix_neighbors, self.n + 1)
+        _free_matrices(self.part_suffix_neighbors, self.n + 1)
         _free_matrices(self.parts_for_vertices, self.n)
-        bitset_free(self.suffix_neighbors_of_vertex)
-        bitset_free(self.suffix_neighbors_of_part)
         bitset_free(self.unlocked_vertices)
         binary_matrix_free(self.vertices_not_added)
         binary_matrix_free(self.unlockers)
@@ -247,7 +242,7 @@ cdef inline int _init_matrices(binary_matrix_t* matrices, int count, int n_rows,
         binary_matrix_init(matrices[i], n_rows, n_cols)
 
 
-cdef inline void _free_matrices(binary_matrix_t* matrices, int count):
+cdef inline void _free_matrices(binary_matrix_t* matrices, int count) noexcept:
     cdef int i
     if matrices != NULL:
         for i in range(count):
@@ -268,7 +263,7 @@ cdef int _branch_and_bound(
     int parts_used,
     int lower_bound,
     int upper_bound,
-):
+) noexcept:
     """Search for a solution that extends the current prefix.
 
     `level` is the length of the prefix. Both bounds are inclusive: only
@@ -280,6 +275,7 @@ cdef int _branch_and_bound(
     cdef bitset_t new_suffix = ctx.new_suffixes.rows[level]
     bitset_copy(new_suffix, suffix_vertices)
 
+    cdef int entry_level = level
     level = _increment_prefix_greedily_on_existing_parts(ctx, new_suffix, level, parts_used)
 
     if bitset_isempty(new_suffix) and parts_used <= upper_bound:
@@ -287,12 +283,13 @@ cdef int _branch_and_bound(
         _copy_array(ctx.n, ctx.part_of, ctx.best_partition)
         return parts_used
 
-    _compute_part_suffix_neighbors(ctx, new_suffix, level, parts_used)
+    # The greedy step left the suffix neighbors at the level the node started at,
+    # which no ancestor uses, as they all keep theirs at shorter prefixes.
+    if level != entry_level:
+        _compute_suffix_neighbors(ctx, new_suffix, level, parts_used)
 
     if _check_state_seen(ctx, new_suffix, level, parts_used):
         return -1
-
-    _compute_vertex_suffix_neighbors(ctx, new_suffix, level)
 
     cdef int best_solution_found = -1
     if _update_best_solution(
@@ -347,7 +344,7 @@ cdef inline bint _update_best_solution(
     int lower_bound,
     int* best_solution_found,
     int* upper_bound,
-):
+) noexcept:
     """Record `solution` if one was found and tighten `upper_bound` to look for a better one.
 
     Returns whether the search can stop because `solution` reaches `lower_bound`.
@@ -361,18 +358,19 @@ cdef inline bint _update_best_solution(
     return False
 
 
-cdef inline void _copy_array(int n, int* array_from, int* array_to):
+cdef inline void _copy_array(int n, int* array_from, int* array_to) noexcept:
     cdef int i
     for i in range(n):
         array_to[i] = array_from[i]
 
 
-cdef inline void _compute_part_suffix_neighbors(
+cdef inline void _compute_suffix_neighbors(
     _Context ctx,
     bitset_t suffix_vertices,
     int level,
     int parts_used,
-):
+) noexcept:
+    """Suffix neighbors of the parts and of the suffix vertices, stored at `level`."""
     cdef int part
     for part in range(parts_used):
         bitset_intersection(
@@ -380,13 +378,6 @@ cdef inline void _compute_part_suffix_neighbors(
             ctx.part_neighbors.rows[part],
             suffix_vertices
         )
-
-
-cdef inline void _compute_vertex_suffix_neighbors(
-    _Context ctx,
-    bitset_t suffix_vertices,
-    int level,
-):
     cdef int vertex = bitset_next(suffix_vertices, 0)
     while vertex != -1:
         bitset_intersection(
@@ -397,7 +388,7 @@ cdef inline void _compute_vertex_suffix_neighbors(
         vertex = bitset_next(suffix_vertices, vertex + 1)
 
 
-cdef inline bint _is_subset_ignoring(bitset_t subset, bitset_t superset, int vertex):
+cdef inline bint _is_subset_ignoring(bitset_t subset, bitset_t superset, int vertex) noexcept:
     """Whether `subset` is a subset of `superset`, ignoring `vertex`.
 
     The suffix neighbors computed at a node include the vertex that is about to
@@ -411,6 +402,16 @@ cdef inline bint _is_subset_ignoring(bitset_t subset, bitset_t superset, int ver
     return is_subset
 
 
+cdef inline bint _is_equal_ignoring(bitset_t first, bitset_t second, int vertex) noexcept:
+    """Whether `first` and `second` are equal, ignoring `vertex`."""
+    if bitset_in(first, vertex) == bitset_in(second, vertex):
+        return bitset_eq(first, second)
+    bitset_flip(first, vertex)
+    cdef bint is_equal = bitset_eq(first, second)
+    bitset_flip(first, vertex)
+    return is_equal
+
+
 cdef inline int _branch_adding_to_existing_part(
     _Context ctx,
     bitset_t suffix_vertices,
@@ -418,7 +419,7 @@ cdef inline int _branch_adding_to_existing_part(
     int parts_used,
     int lower_bound,
     int upper_bound,
-):
+) noexcept:
     cdef bitset_t my_vertices_not_added = ctx.vertices_not_added.rows[level]
     bitset_clear(my_vertices_not_added)
     cdef int best_solution_found = -1
@@ -484,7 +485,7 @@ cdef inline void _get_available_parts_for_vertex(
     int level,
     int parts_used,
     bitset_s* parts_for_vertex,
-):
+) noexcept:
     """Parts that `vertex` can be added to if it is the next vertex of the prefix.
 
     Also records in `ctx.unlockers` the vertices that `vertex` unlocks, see
@@ -526,7 +527,7 @@ cdef inline int _can_other_vertex_be_prepended_freely(
     int part,
     int level,
     bitset_t suffix_vertices,
-):
+) noexcept:
     """`vertex` is not in suffix."""
     cdef bitset_t* vertex_neighbors = ctx.vertex_suffix_neighbors[level].rows
     cdef bitset_t* parts_for_vertices = ctx.parts_for_vertices[level].rows
@@ -548,7 +549,7 @@ cdef inline void _ignore_unlocked_vertices(
     int level,
     bitset_t suffix_vertices,
     bitset_t vertices_not_added,
-):
+) noexcept:
     """Remove from this level's candidates the vertices that some other vertex unlocks.
 
     A vertex `u` unlocks `v` if `u` can be added to some part so that the part's
@@ -576,7 +577,7 @@ cdef inline int _branch_adding_to_new_part(
     int parts_used,
     int lower_bound,
     int upper_bound,
-):
+) noexcept:
     cdef int best_solution_found = -1
     cdef int part = parts_used - 1
     # Vertices discarded by _can_other_vertex_open_new_part_freely are removed from here.
@@ -620,7 +621,7 @@ cdef inline bint _can_other_vertex_open_new_part_freely(
     int vertex,
     int level,
     bitset_t candidates,
-):
+) noexcept:
     """If another candidate for the new part has its suffix neighbors contained in
     those of `vertex`, then `vertex` is discarded from `candidates`. Only vertices
     still in `candidates` are considered, so that a vertex that was already
@@ -649,7 +650,7 @@ cdef inline int _branch_with_vertex_on_part(
     int parts_used,
     int lower_bound,
     int upper_bound,
-):
+) noexcept:
     """`vertex` is not in suffix."""
     ctx.prefix[level] = vertex
     ctx.part_of[vertex] = part
@@ -682,33 +683,43 @@ cdef inline int _increment_prefix_greedily_on_existing_parts(
     bitset_t suffix_vertices,
     int level,
     int parts_used,
-):
+) noexcept:
     """Add to prefix all vertices that have the same suffix neighbors as one of the parts.
 
-    Returns the new length of the prefix.
+    Computes the suffix neighbors at `level`, and keeps them up to date as
+    vertices leave the suffix. Returns the new length of the prefix.
     """
+    _compute_suffix_neighbors(ctx, suffix_vertices, level, parts_used)
+    cdef bitset_t* vertex_neighbors = ctx.vertex_suffix_neighbors[level].rows
+    cdef bitset_t* part_neighbors = ctx.part_suffix_neighbors[level].rows
+    cdef int new_level = level
     cdef int vertex
+    cdef int other_vertex
     cdef int part
     cdef bint suffix_changed = True
     while suffix_changed:
         suffix_changed = False
         vertex = bitset_next(suffix_vertices, 0)
         while vertex != -1:
-            bitset_discard(suffix_vertices, vertex)
-
-            part = _find_greedy_part_for_vertex(ctx, vertex, suffix_vertices, parts_used)
+            part = _find_greedy_part_for_vertex(vertex_neighbors[vertex], part_neighbors, parts_used, vertex)
 
             if part != -1:
-                ctx.prefix[level] = vertex
+                bitset_discard(suffix_vertices, vertex)
+                ctx.prefix[new_level] = vertex
                 ctx.part_of[vertex] = part
-                level += 1
+                new_level += 1
                 suffix_changed = True
-            else:
-                bitset_add(suffix_vertices, vertex)
+
+                for part in range(parts_used):
+                    bitset_discard(part_neighbors[part], vertex)
+                other_vertex = bitset_next(suffix_vertices, 0)
+                while other_vertex != -1:
+                    bitset_discard(vertex_neighbors[other_vertex], vertex)
+                    other_vertex = bitset_next(suffix_vertices, other_vertex + 1)
 
             vertex = bitset_next(suffix_vertices, vertex + 1)
 
-    return level
+    return new_level
 
 
 cdef inline bint _add_vertex_to_prefix_greedily_on_part(
@@ -716,7 +727,7 @@ cdef inline bint _add_vertex_to_prefix_greedily_on_part(
     int part,
     bitset_t suffix_vertices,
     int level,
-):
+) noexcept:
     """Add to the new, empty `part` a vertex without suffix neighbors, if there is one."""
     cdef int vertex = bitset_next(suffix_vertices, 0)
     while vertex != -1:
@@ -731,25 +742,15 @@ cdef inline bint _add_vertex_to_prefix_greedily_on_part(
 
 
 cdef inline int _find_greedy_part_for_vertex(
-    _Context ctx,
-    int vertex,
-    bitset_t suffix_vertices,
+    bitset_t vertex_neighbors,
+    bitset_t* part_neighbors,
     int parts_used,
-):
-    """`vertex` is not in suffix."""
+    int vertex,
+) noexcept:
+    """First part with the same suffix neighbors as `vertex`, ignoring `vertex` itself, or -1."""
     cdef int part
-    bitset_intersection(
-        ctx.suffix_neighbors_of_vertex,
-        ctx.graph.rows[vertex],
-        suffix_vertices
-    )
     for part in range(parts_used):
-        bitset_intersection(
-            ctx.suffix_neighbors_of_part,
-            ctx.part_neighbors.rows[part],
-            suffix_vertices
-        )
-        if bitset_eq(ctx.suffix_neighbors_of_part, ctx.suffix_neighbors_of_vertex):
+        if _is_equal_ignoring(part_neighbors[part], vertex_neighbors, vertex):
             return part
     return -1
 
@@ -759,7 +760,7 @@ cdef inline bint _check_state_seen(
     bitset_t suffix_vertices,
     int level,
     int parts_used,
-):
+) noexcept:
     """Whether a node with the same suffix and the same parts was already searched.
 
     Parts are compared by their suffix neighbors, which are all that matters for
@@ -778,7 +779,7 @@ cdef inline void _update_part_neighbors(
     bitset_t neighbors_of_part,
     bitset_t previous_neighbors_of_part,
     bitset_t neighbors_of_vertex
-):
+) noexcept:
     bitset_copy(previous_neighbors_of_part, neighbors_of_part)
     bitset_union(neighbors_of_part, neighbors_of_part, neighbors_of_vertex)
 
@@ -786,5 +787,5 @@ cdef inline void _update_part_neighbors(
 cdef inline void _undo_update_part_neighbors(
     bitset_t neighbors_of_part,
     bitset_t previous_neighbors_of_part
-):
+) noexcept:
     bitset_copy(neighbors_of_part, previous_neighbors_of_part)
