@@ -1,5 +1,4 @@
 import itertools
-from multiset import Multiset, FrozenMultiset
 
 from sage.graphs.graph import Graph
 from sage.data_structures.binary_matrix cimport *
@@ -8,6 +7,7 @@ from cysignals.memory cimport sig_malloc, sig_calloc, sig_free
 from cysignals.signals cimport sig_on, sig_off
 
 from thinness.consistent_solution import ConsistentSolution
+from thinness.seen_states cimport SeenStates
 
 DEFAULT_MAX_PREFIX_LENGTH = 15
 DEFAULT_MAX_SEEN_ENTRIES = 1_000_000
@@ -135,8 +135,8 @@ cdef class _Context:
     cdef bitset_t suffix_neighbors_of_vertex
     cdef binary_matrix_t part_suffix_neighbors
     cdef bitset_t prefix_non_neighbors_of_vertex
-    cdef dict seen_states
-    cdef int seen_entries
+    cdef binary_matrix_t part_states
+    cdef SeenStates seen_states
     cdef bitset_t canonical_vertices
     cdef int* best_order
     cdef int* best_partition
@@ -177,9 +177,9 @@ cdef class _Context:
         bitset_init(self.suffix_neighbors_of_vertex, n)
         binary_matrix_init(self.part_suffix_neighbors, max_parts, n)
         bitset_init(self.prefix_non_neighbors_of_vertex, n)
+        binary_matrix_init(self.part_states, 2 * max_parts, n)
 
-        self.seen_states = dict()
-        self.seen_entries = 0
+        self.seen_states = SeenStates(self.all_vertices.limbs, max_parts, max_seen_entries, sets_per_part=2)
 
         bitset_init(self.canonical_vertices, n)
         _build_canonical_vertices(graph, self.canonical_vertices)
@@ -209,6 +209,7 @@ cdef class _Context:
         bitset_free(self.suffix_neighbors_of_vertex)
         binary_matrix_free(self.part_suffix_neighbors)
         bitset_free(self.prefix_non_neighbors_of_vertex)
+        binary_matrix_free(self.part_states)
         bitset_free(self.canonical_vertices)
         sig_free(self.best_order)
         sig_free(self.best_partition)
@@ -240,8 +241,8 @@ cdef int _branch_and_bound(
         _copy_array(ctx.n, ctx.part_of, ctx.best_partition)
         return parts_used
 
-    # if _check_state_seen(ctx, new_suffix, parts_used):
-    #     return -1
+    if _check_state_seen(ctx, new_suffix, level, parts_used):
+        return -1
 
     cdef int best_solution_found = _branch_adding_to_existing_part(
         ctx,
@@ -555,43 +556,38 @@ cdef inline bint _is_greedy_part_for_vertex(
 cdef inline bint _check_state_seen(
     _Context ctx,
     bitset_t suffix_vertices,
+    int level,
     int parts_used,
 ):
-    bitset_complement(ctx.prefix_vertices, suffix_vertices)
-    cdef int prefix_len = bitset_len(ctx.prefix_vertices)
-    if prefix_len > ctx.max_prefix_length:
+    """Whether a node with the same suffix and the same parts was already searched.
+
+    All that matters of a part for the rest of the search are its suffix
+    neighbors and the suffix vertices that can't be added to it. Parts are
+    compared by those, regardless of their order.
+    """
+    if level > ctx.max_prefix_length:
         return False
-
-    cdef frozenset frozen_prefix_vertices = frozenset(bitset_list(ctx.prefix_vertices))
-    frozen_part_neighbors = _build_frozen_part_neighbors(ctx, suffix_vertices, parts_used)
-    cdef set seen_part_neighbors
-    if frozen_prefix_vertices in ctx.seen_states:
-        seen_part_neighbors = ctx.seen_states[frozen_prefix_vertices]
-        if frozen_part_neighbors in seen_part_neighbors:
-            return True
-        elif ctx.seen_entries < ctx.max_seen_entries:
-            seen_part_neighbors.add(frozen_part_neighbors)
-            ctx.seen_entries += 1
-    elif ctx.seen_entries < ctx.max_seen_entries:
-        ctx.seen_states[frozen_prefix_vertices] = {frozen_part_neighbors}
-        ctx.seen_entries += 1
-
-    return False
+    _build_part_states(ctx, suffix_vertices, parts_used)
+    return ctx.seen_states.contains_or_add(suffix_vertices, ctx.part_states.rows, parts_used)
 
 
-cdef inline _build_frozen_part_neighbors(
+cdef inline void _build_part_states(
     _Context ctx,
     bitset_t suffix_vertices,
     int parts_used,
 ):
-    suffix_part_neighbors = Multiset()
-    cdef frozenset part_suffix_neighbors_set
+    """For each part, its suffix neighbors and the suffix vertices that are forbidden from it."""
+    cdef int part
     for part in range(parts_used):
-        bitset_intersection(
-            ctx.part_suffix_neighbors.rows[part], ctx.part_neighbors.rows[part], suffix_vertices)
-        part_suffix_neighbors_set = frozenset(bitset_list(ctx.part_suffix_neighbors.rows[part]))
-        suffix_part_neighbors.add(part_suffix_neighbors_set)
-    return FrozenMultiset(suffix_part_neighbors)
+        bitset_intersection(ctx.part_states.rows[2 * part], ctx.part_neighbors.rows[part], suffix_vertices)
+        bitset_clear(ctx.part_states.rows[2 * part + 1])
+    cdef int vertex = bitset_next(suffix_vertices, 0)
+    while vertex != -1:
+        part = bitset_next(ctx.forbidden_parts_for_vertices.rows[vertex], 0)
+        while part != -1:
+            bitset_add(ctx.part_states.rows[2 * part + 1], vertex)
+            part = bitset_next(ctx.forbidden_parts_for_vertices.rows[vertex], part + 1)
+        vertex = bitset_next(suffix_vertices, vertex + 1)
 
 
 cdef inline void _update_part_neighbors(

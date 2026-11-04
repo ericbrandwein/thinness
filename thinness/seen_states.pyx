@@ -10,68 +10,81 @@ cdef enum:
 cdef class SeenStates:
     """Set of states of the branch and bound, stored in an open addressing hash table with linear probing.
 
-    A state is the number of parts used, the suffix and the suffix neighbors of
-    each part, in an order that doesn't depend on the order of the parts. Each
-    set of vertices takes `words` 64-bit words, and the state is stored as a key
-    of `key_words` words, where the unused parts are zero. Each slot of the table
-    is the hash of its key followed by the key. Hashes are never 0, so that 0
-    marks an empty slot.
+    A state is the number of parts used, the suffix and `sets_per_part` sets of
+    vertices for each part, such as the suffix neighbors of the part, in an order
+    that doesn't depend on the order of the parts. Each set of vertices takes
+    `words` 64-bit words, and the state is stored as a key of `key_words` words,
+    where the unused parts are zero. Each slot of the table is the hash of its key
+    followed by the key. Hashes are never 0, so that 0 marks an empty slot.
 
     Once it has `max_size` states, no more are added.
     """
 
-    def __cinit__(self, size_t words, int max_parts, size_t max_size):
+    def __cinit__(self, size_t words, int max_parts, size_t max_size, int sets_per_part=1):
         """`words` is the number of 64-bit words of the sets of vertices of the states."""
         if sizeof(mp_limb_t) != sizeof(uint64_t):
             raise ValueError('Bitset limbs must be 64 bits long')
         self.words = words
         self.max_parts = max_parts
-        self.key_words = 1 + words * (1 + max_parts)
+        self.sets_per_part = sets_per_part
+        self.key_words = 1 + words * (1 + sets_per_part * max_parts)
         self.max_size = max_size
         self.size = 0
         self.capacity = INITIAL_CAPACITY
         self.slots = <uint64_t*>sig_calloc(self.capacity * (1 + self.key_words), sizeof(uint64_t))
         self.key = <uint64_t*>sig_calloc(self.key_words, sizeof(uint64_t))
-        if self.slots == NULL or self.key == NULL:
+        self.part_key = <uint64_t*>sig_calloc(words * sets_per_part, sizeof(uint64_t))
+        if self.slots == NULL or self.key == NULL or self.part_key == NULL:
             raise MemoryError
 
     def __dealloc__(self):
         sig_free(self.slots)
         sig_free(self.key)
+        sig_free(self.part_key)
 
     cdef bint contains_or_add(
         self,
         bitset_t suffix_vertices,
-        bitset_t* part_suffix_neighbors,
+        bitset_t* part_sets,
         int parts_used,
     ) noexcept:
         """Whether the state is in the set. If it isn't, it is added unless the set is full.
 
+        `part_sets` has the `sets_per_part` sets of each part one after the other.
         The bitsets must have `words` limbs.
         """
         cdef size_t bitset_bytes = self.words * sizeof(uint64_t)
+        cdef size_t part_words = self.words * self.sets_per_part
+        cdef size_t part_bytes = part_words * sizeof(uint64_t)
         cdef uint64_t* parts_key = self.key + 1 + self.words
         cdef int part
         cdef int position
+        cdef int i
 
         self.key[0] = parts_used
         memcpy(self.key + 1, suffix_vertices.bits, bitset_bytes)
         # Insertion sort of the parts by their bytes, so that their order doesn't matter.
         for part in range(parts_used):
-            position = part
-            while position > 0 and memcmp(
-                parts_key + (position - 1) * self.words,
-                part_suffix_neighbors[part].bits,
-                bitset_bytes,
-            ) > 0:
+            for i in range(self.sets_per_part):
                 memcpy(
-                    parts_key + position * self.words,
-                    parts_key + (position - 1) * self.words,
+                    self.part_key + i * self.words,
+                    part_sets[part * self.sets_per_part + i].bits,
                     bitset_bytes,
                 )
+            position = part
+            while position > 0 and memcmp(
+                parts_key + (position - 1) * part_words,
+                self.part_key,
+                part_bytes,
+            ) > 0:
+                memcpy(
+                    parts_key + position * part_words,
+                    parts_key + (position - 1) * part_words,
+                    part_bytes,
+                )
                 position -= 1
-            memcpy(parts_key + position * self.words, part_suffix_neighbors[part].bits, bitset_bytes)
-        memset(parts_key + parts_used * self.words, 0, (self.max_parts - parts_used) * bitset_bytes)
+            memcpy(parts_key + position * part_words, self.part_key, part_bytes)
+        memset(parts_key + parts_used * part_words, 0, (self.max_parts - parts_used) * part_bytes)
 
         return self._contains_or_add_key()
 
@@ -81,7 +94,7 @@ cdef class SeenStates:
         uint64_t* part_suffix_neighbors,
         int parts_used,
     ) noexcept:
-        """Same as `contains_or_add`, for sets of one word. `words` must be 1."""
+        """Same as `contains_or_add`, for sets of one word. `words` and `sets_per_part` must be 1."""
         cdef uint64_t* parts_key = self.key + 2
         cdef int part
         cdef int position
