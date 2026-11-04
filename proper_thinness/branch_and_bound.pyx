@@ -23,10 +23,7 @@ def calculate_proper_thinness(
     max_prefix_length: int = DEFAULT_MAX_PREFIX_LENGTH,
     max_seen_entries: int = DEFAULT_MAX_SEEN_ENTRIES,
     use_thinness_lower_bound: bool = True,
-    use_greedy: bool = True,
-    stats: dict = None,
 ) -> ConsistentSolution | int:
-    """If `stats` is given, the search counters are added to it."""
     components = [graph.subgraph(component, immutable=False) for component in graph.connected_components(sort=False)]
     relabellings = [component.relabel(return_map=True) for component in components]
     solutions = [
@@ -38,8 +35,6 @@ def calculate_proper_thinness(
             max_prefix_length,
             max_seen_entries,
             use_thinness_lower_bound,
-            use_greedy,
-            stats,
         ) for component in components
     ]
 
@@ -87,10 +82,8 @@ def calculate_proper_thinness_of_connected_graph(
     max_prefix_length: int = DEFAULT_MAX_PREFIX_LENGTH,
     max_seen_entries: int = DEFAULT_MAX_SEEN_ENTRIES,
     use_thinness_lower_bound: bool = True,
-    use_greedy: bool = True,
-    stats: dict = None,
 ) -> ConsistentSolution | int:
-    """upper_bound is exclusive. If `stats` is given, the search counters are added to it.
+    """upper_bound is exclusive.
 
     The proper thinness is at least the thinness, which is used as lower bound if
     `use_thinness_lower_bound`. A solution found heuristically gives an upper
@@ -103,9 +96,6 @@ def calculate_proper_thinness_of_connected_graph(
         lower_bound = max(lower_bound, thinness_solution.thinness)
         extra_orders.append(thinness_solution.order)
     heuristic = heuristic_solution(graph, extra_orders)
-    if stats is not None:
-        stats['lower_bound'] = stats.get('lower_bound', 0) + lower_bound
-        stats['heuristic'] = stats.get('heuristic', 0) + heuristic.thinness
     if heuristic.thinness <= lower_bound:
         return heuristic if certificate else heuristic.thinness
     upper_bound = heuristic.thinness if upper_bound is None else min(upper_bound, heuristic.thinness)
@@ -117,7 +107,6 @@ def calculate_proper_thinness_of_connected_graph(
         max_branch_and_bound_proper_thinness,
         max_prefix_length,
         max_seen_entries,
-        use_greedy,
     )
 
     sig_on()
@@ -129,10 +118,6 @@ def calculate_proper_thinness_of_connected_graph(
         upper_bound=max_branch_and_bound_proper_thinness,
     )
     sig_off()
-
-    if stats is not None:
-        for key, value in ctx.stats().items():
-            stats[key] = stats.get(key, 0) + value
 
     cdef int proper_thinness = branch_and_bound_proper_thinness if branch_and_bound_proper_thinness != -1 else upper_bound
     cdef list order
@@ -184,15 +169,6 @@ cdef class _Context:
     cdef int* best_partition
     cdef int max_prefix_length
     cdef int max_seen_entries
-    cdef bint use_greedy
-
-    # Search counters, only for measuring.
-    cdef long long nodes
-    cdef long long memo_hits
-    cdef long long memo_hits_after_greedy
-    cdef long long greedy_existing_part
-    cdef long long greedy_new_part
-    cdef long long dominated_parts
 
     def __cinit__(
         self,
@@ -200,7 +176,6 @@ cdef class _Context:
         int max_parts,
         int max_prefix_length,
         int max_seen_entries,
-        bint use_greedy,
     ):
         dense_graph_init(self.graph, graph)
 
@@ -222,7 +197,6 @@ cdef class _Context:
         binary_matrix_init(self.forbidden_parts_for_vertices, n, max_parts)
 
         binary_matrix_init(self.vertices_forbidden_by_vertex, n, n)
-
 
         # Zeroed so that __dealloc__ can free them even if an init below fails.
         self.vertex_suffix_neighbors_by_level = <binary_matrix_t*>sig_calloc(n + 1, sizeof(binary_matrix_t))
@@ -248,17 +222,6 @@ cdef class _Context:
 
         self.max_prefix_length = max_prefix_length
         self.max_seen_entries = max_seen_entries
-        self.use_greedy = use_greedy
-
-    def stats(self) -> dict:
-        return {
-            'nodes': self.nodes,
-            'memo_hits': self.memo_hits,
-            'memo_hits_after_greedy': self.memo_hits_after_greedy,
-            'greedy_existing_part': self.greedy_existing_part,
-            'greedy_new_part': self.greedy_new_part,
-            'dominated_parts': self.dominated_parts,
-        }
 
     def __dealloc__(self):
         cdef int i
@@ -309,7 +272,6 @@ cdef int _branch_and_bound(
     int upper_bound,
 ):
     """upper_bound is inclusive"""
-    ctx.nodes += 1
     cdef int level = _get_level(suffix_vertices)
 
     cdef bitset_t new_suffix = ctx.new_suffixes.rows[level]
@@ -322,16 +284,12 @@ cdef int _branch_and_bound(
     # Checked before the greedy step too, which is the same for the same state, so
     # that nodes already searched don't pay for it.
     if _check_state_seen(ctx, new_suffix, level, parts_used):
-        ctx.memo_hits += 1
         return -1
 
     # The suffix neighbors of this node are kept up to date at the level it started
     # at, which no ancestor uses, as they all keep theirs at shorter prefixes.
     cdef int entry_level = level
-    if ctx.use_greedy:
-        level = _increment_prefix_greedily_on_existing_parts(ctx, new_suffix, level, parts_used)
-    else:
-        _compute_suffix_neighbors(ctx, new_suffix, level, parts_used)
+    level = _increment_prefix_greedily_on_existing_parts(ctx, new_suffix, level, parts_used)
 
     if level != entry_level:
         if bitset_isempty(new_suffix) and parts_used <= upper_bound:
@@ -339,7 +297,6 @@ cdef int _branch_and_bound(
             return parts_used
 
         if _check_state_seen(ctx, new_suffix, level, parts_used):
-            ctx.memo_hits_after_greedy += 1
             return -1
 
     cdef int best_solution_found = _branch_adding_to_existing_part(
@@ -364,8 +321,7 @@ cdef int _branch_and_bound(
         part = parts_used - 1
         lower_bound = max(lower_bound, parts_used)
 
-        if ctx.use_greedy and _add_vertex_to_prefix_greedily_on_part(ctx, part, new_suffix, level, entry_level):
-            ctx.greedy_new_part += 1
+        if _add_vertex_to_prefix_greedily_on_part(ctx, part, new_suffix, level, entry_level):
             new_part_solution = _branch_and_bound(
                 ctx,
                 new_suffix,
@@ -486,14 +442,12 @@ cdef inline bitset_s* _get_available_parts_for_vertex(
                 ctx, vertex, neighbors_level, parts_used, part, other_part, suffix_vertices,
                 &newly_forbidden_vertices_computed,
             ):
-                ctx.dominated_parts += 1
                 bitset_discard(parts_for_vertex, part)
                 break
             elif _is_part_dominated(
                 ctx, vertex, neighbors_level, parts_used, other_part, part, suffix_vertices,
                 &newly_forbidden_vertices_computed,
             ):
-                ctx.dominated_parts += 1
                 bitset_discard(parts_for_vertex, other_part)
             other_part = bitset_next(parts_for_vertex, other_part + 1)
         part = bitset_next(parts_for_vertex, part + 1)
@@ -657,7 +611,6 @@ cdef inline int _increment_prefix_greedily_on_existing_parts(
             part = _find_free_part_for_vertex(ctx, vertex, level, suffix_vertices, parts_used)
 
             if part != -1:
-                ctx.greedy_existing_part += 1
                 ctx.prefix[new_level] = vertex
                 ctx.part_of[vertex] = part
                 new_level += 1
