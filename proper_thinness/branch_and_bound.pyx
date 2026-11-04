@@ -132,8 +132,7 @@ cdef class _Context:
     Holds the graph, the scratch buffers and the search settings, so that the
     recursive functions only receive the values that change between calls.
 
-    The arrays of matrices `*_suffix_neighbors_by_level` have one matrix per
-    prefix length, so that each node of the search keeps its own while its
+    The arrays of matrices `*_by_level` have one matrix per prefix length, so that each node of the search keeps its own while its
     children run.
     """
     cdef int n
@@ -150,6 +149,8 @@ cdef class _Context:
     cdef binary_matrix_t vertices_forbidden_by_vertex
     cdef binary_matrix_t* vertex_suffix_neighbors_by_level
     cdef binary_matrix_t* part_suffix_neighbors_by_level
+    cdef binary_matrix_t* part_forbidden_vertices_by_level
+    cdef bitset_t forbidden_vertices_union
     cdef bitset_t prefix_non_neighbors_of_vertex
     cdef bitset_t newly_forbidden_vertices
     cdef binary_matrix_t part_states
@@ -167,6 +168,7 @@ cdef class _Context:
     cdef long long memo_hits_after_greedy
     cdef long long greedy_existing_part
     cdef long long greedy_new_part
+    cdef long long dominated_parts
 
     def __cinit__(
         self,
@@ -201,9 +203,12 @@ cdef class _Context:
         # Zeroed so that __dealloc__ can free them even if an init below fails.
         self.vertex_suffix_neighbors_by_level = <binary_matrix_t*>sig_calloc(n + 1, sizeof(binary_matrix_t))
         self.part_suffix_neighbors_by_level = <binary_matrix_t*>sig_calloc(n + 1, sizeof(binary_matrix_t))
+        self.part_forbidden_vertices_by_level = <binary_matrix_t*>sig_calloc(n + 1, sizeof(binary_matrix_t))
         for i in range(n + 1):
             binary_matrix_init(self.vertex_suffix_neighbors_by_level[i], n, n)
             binary_matrix_init(self.part_suffix_neighbors_by_level[i], max_parts, n)
+            binary_matrix_init(self.part_forbidden_vertices_by_level[i], max_parts, n)
+        bitset_init(self.forbidden_vertices_union, n)
         bitset_init(self.prefix_non_neighbors_of_vertex, n)
         bitset_init(self.newly_forbidden_vertices, n)
         binary_matrix_init(self.part_states, 2 * max_parts, n)
@@ -227,6 +232,7 @@ cdef class _Context:
             'memo_hits_after_greedy': self.memo_hits_after_greedy,
             'greedy_existing_part': self.greedy_existing_part,
             'greedy_new_part': self.greedy_new_part,
+            'dominated_parts': self.dominated_parts,
         }
 
     def __dealloc__(self):
@@ -250,6 +256,11 @@ cdef class _Context:
             for i in range(self.n + 1):
                 binary_matrix_free(self.part_suffix_neighbors_by_level[i])
             sig_free(self.part_suffix_neighbors_by_level)
+        if self.part_forbidden_vertices_by_level != NULL:
+            for i in range(self.n + 1):
+                binary_matrix_free(self.part_forbidden_vertices_by_level[i])
+            sig_free(self.part_forbidden_vertices_by_level)
+        bitset_free(self.forbidden_vertices_union)
         bitset_free(self.prefix_non_neighbors_of_vertex)
         bitset_free(self.newly_forbidden_vertices)
         binary_matrix_free(self.part_states)
@@ -382,7 +393,13 @@ cdef inline int _branch_adding_to_existing_part(
         bitset_discard(suffix_vertices, vertex)
         ctx.prefix[level] = vertex
 
-        parts_for_vertex = _get_available_parts_for_vertex(ctx, vertex, neighbors_level, parts_used)
+        parts_for_vertex = _get_available_parts_for_vertex(
+            ctx,
+            vertex,
+            neighbors_level,
+            parts_used,
+            suffix_vertices,
+        )
         part = bitset_next(parts_for_vertex, 0)
         while part != -1:
             current_solution = _branch_with_vertex_on_part(
@@ -414,34 +431,82 @@ cdef inline bitset_s* _get_available_parts_for_vertex(
     int vertex,
     int neighbors_level,
     int parts_used,
+    bitset_t suffix_vertices,
 ):
     """Parts that `vertex` can be added to if it is the next vertex of the prefix.
 
-    The suffix neighbors are the ones stored at `neighbors_level`, which are those
-    of the suffix with `vertex`, so `vertex` is ignored when comparing them.
+    `vertex` is not in suffix. The suffix neighbors and forbidden vertices are the
+    ones stored at `neighbors_level`, which are those of the suffix with `vertex`,
+    so `vertex` is ignored when comparing them. Of the parts that dominate each
+    other, only one is kept, see `_is_part_dominated`.
     """
     cdef bitset_s* vertex_neighbors = ctx.vertex_suffix_neighbors_by_level[neighbors_level].rows[vertex]
     cdef bitset_t* part_neighbors = ctx.part_suffix_neighbors_by_level[neighbors_level].rows
     cdef bitset_s* parts_for_vertex = ctx.parts_for_vertices.rows[vertex]
     cdef int part
+    cdef int other_part
     bitset_clear(parts_for_vertex)
     for part in range(parts_used):
         if _is_subset_ignoring(part_neighbors[part], vertex_neighbors, vertex):
             bitset_add(parts_for_vertex, part)
-
-    # for part in range(parts_used):
-    #     if bitset_in(parts_for_vertex, part):
-    #         for other_part in range(part):
-    #             if bitset_in(parts_for_vertex, other_part):
-    #                 if _is_subset_ignoring(part_neighbors[part], part_neighbors[other_part], vertex):
-    #                     bitset_discard(parts_for_vertex, part)
-    #                     break
-    #                 elif _is_subset_ignoring(part_neighbors[other_part], part_neighbors[part], vertex):
-    #                     bitset_discard(parts_for_vertex, other_part)
-
     bitset_difference(parts_for_vertex, parts_for_vertex, ctx.forbidden_parts_for_vertices.rows[vertex])
 
+    cdef bint newly_forbidden_vertices_computed = False
+    part = bitset_next(parts_for_vertex, 0)
+    while part != -1:
+        other_part = bitset_next(parts_for_vertex, 0)
+        while other_part != -1 and other_part < part:
+            if _is_part_dominated(
+                ctx, vertex, neighbors_level, part, other_part, suffix_vertices,
+                &newly_forbidden_vertices_computed,
+            ):
+                ctx.dominated_parts += 1
+                bitset_discard(parts_for_vertex, part)
+                break
+            elif _is_part_dominated(
+                ctx, vertex, neighbors_level, other_part, part, suffix_vertices,
+                &newly_forbidden_vertices_computed,
+            ):
+                ctx.dominated_parts += 1
+                bitset_discard(parts_for_vertex, other_part)
+            other_part = bitset_next(parts_for_vertex, other_part + 1)
+        part = bitset_next(parts_for_vertex, part + 1)
+
     return parts_for_vertex
+
+
+cdef inline bint _is_part_dominated(
+    _Context ctx,
+    int vertex,
+    int neighbors_level,
+    int part,
+    int other_part,
+    bitset_t suffix_vertices,
+    bint* newly_forbidden_vertices_computed,
+):
+    """Whether adding `vertex` to `other_part` is always at least as good as adding it to `part`.
+
+    Adding `vertex` to either part gives it the suffix neighbors of `vertex`, and
+    forbids from it the newly forbidden vertices of `vertex`. It's at least as
+    good to add it to `other_part` if, afterwards, each of the two parts has at
+    most the suffix neighbors and forbidden vertices of the other one if `vertex`
+    is added to `part` instead. That is, if `part` has at most the suffix
+    neighbors and forbidden vertices of `other_part`, and the forbidden vertices
+    of `other_part` are those of `part` plus at most some of the newly forbidden
+    vertices of `vertex`. Both parts are available for `vertex`, which is not in
+    suffix.
+    """
+    cdef bitset_t* part_neighbors = ctx.part_suffix_neighbors_by_level[neighbors_level].rows
+    cdef bitset_t* part_forbidden_vertices = ctx.part_forbidden_vertices_by_level[neighbors_level].rows
+    if not _is_subset_ignoring(part_neighbors[part], part_neighbors[other_part], vertex):
+        return False
+    if not _is_subset_ignoring(part_forbidden_vertices[part], part_forbidden_vertices[other_part], vertex):
+        return False
+    if not newly_forbidden_vertices_computed[0]:
+        _compute_newly_forbidden_vertices(ctx, vertex, suffix_vertices)
+        newly_forbidden_vertices_computed[0] = True
+    bitset_union(ctx.forbidden_vertices_union, part_forbidden_vertices[part], ctx.newly_forbidden_vertices)
+    return _is_subset_ignoring(part_forbidden_vertices[other_part], ctx.forbidden_vertices_union, vertex)
 
 
 cdef inline bint _is_subset_ignoring(bitset_t subset, bitset_t superset, int vertex):
@@ -542,13 +607,14 @@ cdef inline int _increment_prefix_greedily_on_existing_parts(
 ):
     """Add to prefix all vertices that can be added to an existing part for free.
 
-    Computes the suffix neighbors of the vertices and the parts at `level`, and
-    keeps them up to date as vertices leave the suffix. Returns the new length of
+    Computes the suffix neighbors of the vertices and the parts, and the suffix
+    vertices forbidden from each part, at `level`, and keeps them up to date as vertices leave the suffix. Returns the new length of
     the prefix.
     """
     _compute_suffix_neighbors(ctx, suffix_vertices, level, parts_used)
     cdef bitset_t* vertex_neighbors = ctx.vertex_suffix_neighbors_by_level[level].rows
     cdef bitset_t* part_neighbors = ctx.part_suffix_neighbors_by_level[level].rows
+    cdef bitset_t* part_forbidden_vertices = ctx.part_forbidden_vertices_by_level[level].rows
     cdef int new_level = level
     cdef int vertex
     cdef int other_vertex
@@ -571,6 +637,7 @@ cdef inline int _increment_prefix_greedily_on_existing_parts(
 
                 for part in range(parts_used):
                     bitset_discard(part_neighbors[part], vertex)
+                    bitset_discard(part_forbidden_vertices[part], vertex)
                 other_vertex = bitset_next(suffix_vertices, 0)
                 while other_vertex != -1:
                     bitset_discard(vertex_neighbors[other_vertex], vertex)
@@ -589,7 +656,11 @@ cdef inline void _compute_suffix_neighbors(
     int level,
     int parts_used,
 ):
-    """Suffix neighbors of the parts and of the suffix vertices, stored at `level`."""
+    """Suffix neighbors of the parts and of the suffix vertices, and suffix vertices forbidden from each part.
+
+    They are stored at `level`.
+    """
+    cdef bitset_t* part_forbidden_vertices = ctx.part_forbidden_vertices_by_level[level].rows
     cdef int part
     for part in range(parts_used):
         bitset_intersection(
@@ -597,6 +668,7 @@ cdef inline void _compute_suffix_neighbors(
             ctx.part_neighbors.rows[part],
             suffix_vertices
         )
+        bitset_clear(part_forbidden_vertices[part])
     cdef int vertex = bitset_next(suffix_vertices, 0)
     while vertex != -1:
         bitset_intersection(
@@ -604,6 +676,10 @@ cdef inline void _compute_suffix_neighbors(
             ctx.graph.rows[vertex],
             suffix_vertices
         )
+        part = bitset_next(ctx.forbidden_parts_for_vertices.rows[vertex], 0)
+        while part != -1:
+            bitset_add(part_forbidden_vertices[part], vertex)
+            part = bitset_next(ctx.forbidden_parts_for_vertices.rows[vertex], part + 1)
         vertex = bitset_next(suffix_vertices, vertex + 1)
 
 
