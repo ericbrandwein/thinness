@@ -6,8 +6,10 @@ from sage.graphs.base.static_dense_graph cimport dense_graph_init
 from cysignals.memory cimport sig_malloc, sig_calloc, sig_free
 from cysignals.signals cimport sig_on, sig_off
 
+from thinness.branch_and_bound import calculate_thinness
 from thinness.consistent_solution import ConsistentSolution
 from thinness.seen_states cimport SeenStates
+from proper_thinness.heuristic import heuristic_solution
 
 DEFAULT_MAX_PREFIX_LENGTH = 15
 DEFAULT_MAX_SEEN_ENTRIES = 1_000_000
@@ -20,6 +22,7 @@ def calculate_proper_thinness(
     certificate: bool = False,
     max_prefix_length: int = DEFAULT_MAX_PREFIX_LENGTH,
     max_seen_entries: int = DEFAULT_MAX_SEEN_ENTRIES,
+    use_thinness_lower_bound: bool = True,
     use_greedy: bool = True,
     stats: dict = None,
 ) -> ConsistentSolution | int:
@@ -34,6 +37,7 @@ def calculate_proper_thinness(
             certificate,
             max_prefix_length,
             max_seen_entries,
+            use_thinness_lower_bound,
             use_greedy,
             stats,
         ) for component in components
@@ -82,12 +86,29 @@ def calculate_proper_thinness_of_connected_graph(
     certificate: bool = False,
     max_prefix_length: int = DEFAULT_MAX_PREFIX_LENGTH,
     max_seen_entries: int = DEFAULT_MAX_SEEN_ENTRIES,
+    use_thinness_lower_bound: bool = True,
     use_greedy: bool = True,
     stats: dict = None,
 ) -> ConsistentSolution | int:
-    """upper_bound is exclusive. If `stats` is given, the search counters are added to it."""
-    if upper_bound is None:
-        upper_bound = graph.order() + 1
+    """upper_bound is exclusive. If `stats` is given, the search counters are added to it.
+
+    The proper thinness is at least the thinness, which is used as lower bound if
+    `use_thinness_lower_bound`. A solution found heuristically gives an upper
+    bound, and is returned if the search doesn't find a better one. The order of
+    the thinness solution is one of the orders the heuristic tries.
+    """
+    extra_orders = []
+    if use_thinness_lower_bound:
+        thinness_solution = calculate_thinness(graph, certificate=True)
+        lower_bound = max(lower_bound, thinness_solution.thinness)
+        extra_orders.append(thinness_solution.order)
+    heuristic = heuristic_solution(graph, extra_orders)
+    if stats is not None:
+        stats['lower_bound'] = stats.get('lower_bound', 0) + lower_bound
+        stats['heuristic'] = stats.get('heuristic', 0) + heuristic.thinness
+    if heuristic.thinness <= lower_bound:
+        return heuristic if certificate else heuristic.thinness
+    upper_bound = heuristic.thinness if upper_bound is None else min(upper_bound, heuristic.thinness)
 
     cdef int max_branch_and_bound_proper_thinness = upper_bound - 1
 
@@ -117,6 +138,8 @@ def calculate_proper_thinness_of_connected_graph(
     cdef list order
     cdef list partition
     if certificate:
+        if branch_and_bound_proper_thinness == -1:
+            return heuristic
         order = [ctx.best_order[i] for i in range(ctx.n)]
         partition = [set() for _ in range(proper_thinness)]
         for vertex in range(ctx.n):
