@@ -147,7 +147,7 @@ cdef class _Context:
     cdef binary_matrix_t previous_part_neighbors
     cdef binary_matrix_t parts_for_vertices
     cdef binary_matrix_t forbidden_parts_for_vertices
-    cdef binary_matrix_t* previous_forbidden_parts_for_vertices
+    cdef binary_matrix_t vertices_forbidden_by_vertex
     cdef binary_matrix_t* vertex_suffix_neighbors_by_level
     cdef binary_matrix_t* part_suffix_neighbors_by_level
     cdef bitset_t prefix_non_neighbors_of_vertex
@@ -195,10 +195,7 @@ cdef class _Context:
         binary_matrix_init(self.parts_for_vertices, n, max_parts)
         binary_matrix_init(self.forbidden_parts_for_vertices, n, max_parts)
 
-        # Zeroed so that __dealloc__ can free it even if an init below fails.
-        self.previous_forbidden_parts_for_vertices = <binary_matrix_t*>sig_calloc(n, sizeof(binary_matrix_t))
-        for i in range(n):
-            binary_matrix_init(self.previous_forbidden_parts_for_vertices[i], n, max_parts)
+        binary_matrix_init(self.vertices_forbidden_by_vertex, n, n)
 
 
         # Zeroed so that __dealloc__ can free them even if an init below fails.
@@ -244,10 +241,7 @@ cdef class _Context:
         binary_matrix_free(self.previous_part_neighbors)
         binary_matrix_free(self.parts_for_vertices)
         binary_matrix_free(self.forbidden_parts_for_vertices)
-        if self.previous_forbidden_parts_for_vertices != NULL:
-            for i in range(self.n):
-                binary_matrix_free(self.previous_forbidden_parts_for_vertices[i])
-            sig_free(self.previous_forbidden_parts_for_vertices)
+        binary_matrix_free(self.vertices_forbidden_by_vertex)
         if self.vertex_suffix_neighbors_by_level != NULL:
             for i in range(self.n + 1):
                 binary_matrix_free(self.vertex_suffix_neighbors_by_level[i])
@@ -535,7 +529,7 @@ cdef inline int _branch_with_vertex_on_part(
         ctx.previous_part_neighbors.rows[vertex]
     )
 
-    _undo_update_forbidden_parts_for_vertices(ctx, vertex, suffix_vertices)
+    _undo_update_forbidden_parts_for_vertices(ctx, vertex, part)
 
     return solution
 
@@ -782,25 +776,29 @@ cdef inline void _update_forbidden_parts_for_vertices(
     int part_of_new_vertex,
     bitset_t suffix_vertices,
 ):
+    """Forbid the part of `new_vertex` for the suffix vertices that can't go after it in it.
+
+    The vertices that didn't have it forbidden yet are stored in
+    `ctx.vertices_forbidden_by_vertex.rows[new_vertex]`, to undo it.
+    """
     _compute_newly_forbidden_vertices(ctx, new_vertex, suffix_vertices)
-
-    for vertex in bitset_list(suffix_vertices):
-        bitset_copy(
-            ctx.previous_forbidden_parts_for_vertices[new_vertex].rows[vertex],
-            ctx.forbidden_parts_for_vertices.rows[vertex]
-        )
-
-    for vertex in bitset_list(ctx.newly_forbidden_vertices):
-        bitset_add(ctx.forbidden_parts_for_vertices.rows[vertex], part_of_new_vertex)
+    cdef bitset_s* vertices_forbidden = ctx.vertices_forbidden_by_vertex.rows[new_vertex]
+    bitset_clear(vertices_forbidden)
+    cdef int vertex = bitset_next(ctx.newly_forbidden_vertices, 0)
+    while vertex != -1:
+        if not bitset_in(ctx.forbidden_parts_for_vertices.rows[vertex], part_of_new_vertex):
+            bitset_add(ctx.forbidden_parts_for_vertices.rows[vertex], part_of_new_vertex)
+            bitset_add(vertices_forbidden, vertex)
+        vertex = bitset_next(ctx.newly_forbidden_vertices, vertex + 1)
 
 
 cdef inline void _undo_update_forbidden_parts_for_vertices(
     _Context ctx,
     int new_vertex,
-    bitset_t suffix_vertices,
+    int part_of_new_vertex,
 ):
-    for vertex in bitset_list(suffix_vertices):
-        bitset_copy(
-            ctx.forbidden_parts_for_vertices.rows[vertex],
-            ctx.previous_forbidden_parts_for_vertices[new_vertex].rows[vertex]
-        )
+    cdef bitset_s* vertices_forbidden = ctx.vertices_forbidden_by_vertex.rows[new_vertex]
+    cdef int vertex = bitset_next(vertices_forbidden, 0)
+    while vertex != -1:
+        bitset_discard(ctx.forbidden_parts_for_vertices.rows[vertex], part_of_new_vertex)
+        vertex = bitset_next(vertices_forbidden, vertex + 1)
