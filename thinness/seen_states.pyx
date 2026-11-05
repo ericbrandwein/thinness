@@ -91,25 +91,35 @@ cdef class SeenStates:
     cdef bint contains_or_add_words(
         self,
         uint64_t suffix_vertices,
-        uint64_t* part_suffix_neighbors,
+        uint64_t* part_sets,
         int parts_used,
     ) noexcept:
-        """Same as `contains_or_add`, for sets of one word. `words` and `sets_per_part` must be 1."""
+        """Same as `contains_or_add`, for sets of one word. `words` must be 1."""
+        cdef int sets_per_part = self.sets_per_part
         cdef uint64_t* parts_key = self.key + 2
+        cdef uint64_t* sets
         cdef int part
         cdef int position
+        cdef int i
 
         self.key[0] = parts_used
         self.key[1] = suffix_vertices
         # Insertion sort of the parts, so that their order doesn't matter.
         for part in range(parts_used):
+            sets = part_sets + part * sets_per_part
             position = part
-            while position > 0 and parts_key[position - 1] > part_suffix_neighbors[part]:
-                parts_key[position] = parts_key[position - 1]
+            while position > 0 and _compare_words(
+                parts_key + (position - 1) * sets_per_part,
+                sets,
+                sets_per_part,
+            ) > 0:
+                for i in range(sets_per_part):
+                    parts_key[position * sets_per_part + i] = parts_key[(position - 1) * sets_per_part + i]
                 position -= 1
-            parts_key[position] = part_suffix_neighbors[part]
-        for part in range(parts_used, self.max_parts):
-            parts_key[part] = 0
+            for i in range(sets_per_part):
+                parts_key[position * sets_per_part + i] = sets[i]
+        for i in range(parts_used * sets_per_part, self.max_parts * sets_per_part):
+            parts_key[i] = 0
 
         return self._contains_or_add_key()
 
@@ -170,6 +180,15 @@ cdef class SeenStates:
         self.slots = new_slots
         self.capacity = new_capacity
         return True
+
+
+cdef inline int _compare_words(uint64_t* first, uint64_t* second, int count) noexcept:
+    """Compares the first `count` words of `first` and `second` lexicographically."""
+    cdef int i
+    for i in range(count):
+        if first[i] != second[i]:
+            return 1 if first[i] > second[i] else -1
+    return 0
 
 
 cdef inline uint64_t _hash_words(uint64_t* words, size_t count) noexcept:

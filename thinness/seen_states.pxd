@@ -25,7 +25,7 @@ cdef class SeenStates:
     cdef bint contains_or_add_words(
         self,
         uint64_t suffix_vertices,
-        uint64_t* part_suffix_neighbors,
+        uint64_t* part_sets,
         int parts_used,
     ) noexcept
     cdef bint _contains_or_add_key(self) noexcept
