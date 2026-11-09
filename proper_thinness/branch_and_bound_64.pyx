@@ -4,6 +4,7 @@ It is the same search as the one in `branch_and_bound`, which works for graphs
 of any size, function by function.
 """
 from libc.stdint cimport uint64_t
+from libc.string cimport memcpy
 from sage.graphs.graph import Graph
 from cysignals.memory cimport sig_calloc, sig_free
 from cysignals.signals cimport sig_on, sig_off
@@ -31,8 +32,43 @@ def search(
     number of parts of the best solution found, or -1 if none was found, and the
     order and the part of each vertex of that solution.
     """
-    cdef _Context ctx = _Context(graph, upper_bound, max_prefix_length, max_seen_entries)
+    cdef _Context ctx = _Context(graph.order(), upper_bound, max_prefix_length, max_seen_entries)
+    for u, v in graph.edge_iterator(labels=False):
+        ctx.graph[u] |= _bit(v)
+        ctx.graph[v] |= _bit(u)
+    cdef list orbit
+    for orbit in graph.automorphism_group(orbits=True, return_group=False):
+        ctx.canonical_vertices |= _bit(orbit[0])
 
+    cdef int solution = _search(ctx, lower_bound, upper_bound)
+
+    return (
+        solution,
+        [ctx.best_order[i] for i in range(ctx.n)],
+        [ctx.best_partition[i] for i in range(ctx.n)],
+    )
+
+
+cdef int search_words(
+    const uint64_t* graph,
+    int n,
+    uint64_t canonical_vertices,
+    int lower_bound,
+    int upper_bound,
+    int max_prefix_length,
+    int max_seen_entries,
+) except -2:
+    """Same as `search`, for a graph given by the neighbors of each vertex, without the solution.
+
+    `canonical_vertices` has one vertex of each orbit of the automorphism group.
+    """
+    cdef _Context ctx = _Context(n, upper_bound, max_prefix_length, max_seen_entries)
+    memcpy(ctx.graph, graph, n * sizeof(uint64_t))
+    ctx.canonical_vertices = canonical_vertices
+    return _search(ctx, lower_bound, upper_bound)
+
+
+cdef int _search(_Context ctx, int lower_bound, int upper_bound) except -2:
     sig_on()
     cdef int solution = _branch_and_bound(
         ctx,
@@ -43,12 +79,7 @@ def search(
         upper_bound=upper_bound,
     )
     sig_off()
-
-    return (
-        solution,
-        [ctx.best_order[i] for i in range(ctx.n)],
-        [ctx.best_partition[i] for i in range(ctx.n)],
-    )
+    return solution
 
 
 cdef class _Context:
@@ -79,12 +110,12 @@ cdef class _Context:
 
     def __cinit__(
         self,
-        graph: Graph,
+        int n,
         int max_parts,
         int max_prefix_length,
         int max_seen_entries,
     ):
-        cdef int n = graph.order()
+        """The graph and the canonical vertices are filled in afterwards."""
         if n > MAX_VERTICES or max_parts > MAX_VERTICES:
             raise ValueError(f'Graphs must have at most {MAX_VERTICES} vertices')
         self.n = n
@@ -114,17 +145,8 @@ cdef class _Context:
         ):
             raise MemoryError
 
-        for u, v in graph.edge_iterator(labels=False):
-            self.graph[u] |= _bit(v)
-            self.graph[v] |= _bit(u)
-
         self.seen_states = SeenStates(1, max_parts, max_seen_entries, sets_per_part=2)
-
         self.canonical_vertices = 0
-        cdef list orbit
-        for orbit in graph.automorphism_group(orbits=True, return_group=False):
-            self.canonical_vertices |= _bit(orbit[0])
-
         self.max_prefix_length = max_prefix_length
 
     def __dealloc__(self):

@@ -6,10 +6,21 @@ Includes two exact algorithms:
 - One is a branch and bound algorithm with some greedy optimizations.
 - The other one uses the Z3 SMT solver to obtain a solution from an integer constraints formulation.
 
-The B&B algorithm is much faster than the other one, but currently does not support calculating the proper thinness.
+Both calculate the thinness and the proper thinness. The B&B algorithm is much faster than the other one.
 
 ## Classification of small graphs
-The minimal graphs for each thinness and proper thinness value for graphs with up to 10 vertices can be found in the CSV files in [data/](data/). These were generated with the script [minimal.py](minimal.py).
+The minimal graphs for each thinness and proper thinness value for graphs with up to 10 vertices can be found in the CSV files in [data/](data/). A graph is minimal if every proper induced subgraph has a smaller value.
+
+They are generated with [minimal_graphs](minimal_graphs/):
+
+```bash
+pipenv run python -m minimal_graphs.generate 10
+pipenv run python -m minimal_graphs.compare
+```
+
+The first command writes the lists to `data/generated/`, and the second one compares them with the ones in `data/`, up to isomorphism. As both parameters are hereditary, a graph is minimal if its value is larger than the values of the graphs obtained by removing one of its vertices, which are looked up in tables of the smaller orders. The graphs with 10 vertices take about 2 CPU hours. It needs nauty (`geng` and its library), which comes with SageMath.
+
+Removing a vertex lowers the thinness by at most one, but it can lower the proper thinness by two: `I?BvUqw]?` and `IUZurzmmo` have proper thinness 5, and removing any of their vertices leaves a graph with proper thinness 3. They are the only such graphs with up to 10 vertices.
 
 ## Requirements
 - Python >=3.10
