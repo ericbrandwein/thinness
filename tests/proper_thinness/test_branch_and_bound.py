@@ -1,10 +1,12 @@
 import unittest
+import unittest.mock
 import itertools
 
 from sage.graphs.graph import Graph
 from sage.graphs.graph_generators import graphs
 from sage.misc.randstate import set_random_seed
 
+from proper_thinness import branch_and_bound
 from proper_thinness.branch_and_bound import calculate_proper_thinness
 from thinness.z3 import Z3ProperThinnessSolver
 from proper_thinness.verify import verify_solution
@@ -88,6 +90,18 @@ class TestBranchAndBound(unittest.TestCase):
                             calculate_proper_thinness(graph, max_seen_entries=0),
                             proper_thinness,
                         )
+
+    def test_proper_thinness_of_random_graphs_with_bitsets_against_reference(self):
+        # Graphs this small are searched with 64-bit words, so force the search with bitsets.
+        set_random_seed(0)
+        with unittest.mock.patch.object(branch_and_bound, 'MAX_VERTICES_FOR_WORDS', 0):
+            for n in range(9, 12):
+                for density in [0.2, 0.5, 0.8]:
+                    for _ in range(5):
+                        graph = graphs.RandomGNP(n, density)
+                        proper_thinness = reference_proper_thinness(graph)
+                        with self.subTest(graph=graph.graph6_string()):
+                            self._assert_proper_thinness_of_graph(graph, proper_thinness)
 
 
 def reference_proper_thinness(graph: Graph) -> int:
