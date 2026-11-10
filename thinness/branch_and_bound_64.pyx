@@ -18,7 +18,6 @@ cdef int _ALL_OPTIMIZATIONS = ALL_OPTIMIZATIONS
 cdef int _SYMMETRY = Optimization.SYMMETRY
 cdef int _SEEN_STATES = Optimization.SEEN_STATES
 cdef int _GREEDY_EXISTING_PART = Optimization.GREEDY_EXISTING_PART
-cdef int _GREEDY_NEW_PART = Optimization.GREEDY_NEW_PART
 cdef int _PART_DOMINANCE = Optimization.PART_DOMINANCE
 cdef int _VERTEX_DOMINANCE = Optimization.VERTEX_DOMINANCE
 cdef int _NEW_PART_ONLY_IF_NEEDED = Optimization.NEW_PART_ONLY_IF_NEEDED
@@ -263,40 +262,17 @@ cdef int _branch_and_bound(
         return best_solution_found
 
     cdef int new_part_solution
-    cdef int part
-    cdef int vertex
     if parts_used < upper_bound:
         parts_used += 1
-        part = parts_used - 1
         lower_bound = max(lower_bound, parts_used)
-
-        vertex = (
-            _find_vertex_without_suffix_neighbors(ctx, suffix_vertices, level)
-            if ctx.optimizations & _GREEDY_NEW_PART
-            else -1
+        new_part_solution = _branch_adding_to_new_part(
+            ctx,
+            suffix_vertices,
+            level,
+            parts_used,
+            lower_bound,
+            upper_bound,
         )
-        if vertex != -1:
-            # The new part is empty, so it can take such a vertex greedily.
-            ctx.prefix[level] = vertex
-            ctx.part_of[vertex] = part
-            new_part_solution = _branch_and_bound(
-                ctx,
-                suffix_vertices & ~_bit(vertex),
-                level + 1,
-                parts_used,
-                lower_bound,
-                upper_bound,
-            )
-        else:
-            new_part_solution = _branch_adding_to_new_part(
-                ctx,
-                suffix_vertices,
-                level,
-                parts_used,
-                lower_bound,
-                upper_bound,
-            )
-
         if new_part_solution != -1:
             best_solution_found = new_part_solution
 
@@ -665,23 +641,6 @@ cdef inline int _increment_prefix_greedily_on_existing_parts(
             vertex = _next(suffix_vertices[0], vertex + 1)
 
     return new_level
-
-
-cdef inline int _find_vertex_without_suffix_neighbors(
-    _Context ctx,
-    uint64_t suffix_vertices,
-    int level,
-) noexcept:
-    """First vertex of the suffix without suffix neighbors, or -1."""
-    cdef uint64_t* vertex_neighbors = ctx.vertex_suffix_neighbors + level * ctx.n
-    cdef uint64_t rest = suffix_vertices
-    cdef int vertex
-    while rest != 0:
-        vertex = __builtin_ctzll(rest)
-        rest &= rest - 1
-        if vertex_neighbors[vertex] == 0:
-            return vertex
-    return -1
 
 
 cdef inline int _find_greedy_part_for_vertex(

@@ -21,7 +21,6 @@ MAX_VERTICES_FOR_WORDS = branch_and_bound_64.MAX_VERTICES
 cdef int _SYMMETRY = Optimization.SYMMETRY
 cdef int _SEEN_STATES = Optimization.SEEN_STATES
 cdef int _GREEDY_EXISTING_PART = Optimization.GREEDY_EXISTING_PART
-cdef int _GREEDY_NEW_PART = Optimization.GREEDY_NEW_PART
 cdef int _PART_DOMINANCE = Optimization.PART_DOMINANCE
 cdef int _VERTEX_DOMINANCE = Optimization.VERTEX_DOMINANCE
 cdef int _NEW_PART_ONLY_IF_NEEDED = Optimization.NEW_PART_ONLY_IF_NEEDED
@@ -390,31 +389,17 @@ cdef int _branch_and_bound(
         return best_solution_found
 
     cdef int new_part_solution
-    cdef int part
     if parts_used < upper_bound:
         parts_used += 1
-        part = parts_used - 1
         lower_bound = max(lower_bound, parts_used)
-
-        if ctx.optimizations & _GREEDY_NEW_PART and _add_vertex_to_prefix_greedily_on_part(ctx, part, new_suffix, level):
-            new_part_solution = _branch_and_bound(
-                ctx,
-                new_suffix,
-                level + 1,
-                parts_used,
-                lower_bound,
-                upper_bound,
-            )
-        else:
-            new_part_solution = _branch_adding_to_new_part(
-                ctx,
-                new_suffix,
-                level,
-                parts_used,
-                lower_bound,
-                upper_bound,
-            )
-
+        new_part_solution = _branch_adding_to_new_part(
+            ctx,
+            new_suffix,
+            level,
+            parts_used,
+            lower_bound,
+            upper_bound,
+        )
         if new_part_solution != -1:
             best_solution_found = new_part_solution
 
@@ -829,25 +814,6 @@ cdef inline int _increment_prefix_greedily_on_existing_parts(
             vertex = bitset_next(suffix_vertices, vertex + 1)
 
     return new_level
-
-
-cdef inline bint _add_vertex_to_prefix_greedily_on_part(
-    _Context ctx,
-    int part,
-    bitset_t suffix_vertices,
-    int level,
-) noexcept:
-    """Add to the new, empty `part` a vertex without suffix neighbors, if there is one."""
-    cdef int vertex = bitset_next(suffix_vertices, 0)
-    while vertex != -1:
-        if bitset_isempty(ctx.vertex_suffix_neighbors[level].rows[vertex]):
-            bitset_discard(suffix_vertices, vertex)
-            ctx.prefix[level] = vertex
-            ctx.part_of[vertex] = part
-            return True
-        vertex = bitset_next(suffix_vertices, vertex + 1)
-
-    return False
 
 
 cdef inline int _find_greedy_part_for_vertex(

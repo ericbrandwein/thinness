@@ -20,22 +20,21 @@ class Optimization(enum.IntFlag):
     SEEN_STATES = 1 << 3
     # A vertex with the same suffix neighbors as a part is added to it without branching.
     GREEDY_EXISTING_PART = 1 << 4
-    # A vertex without suffix neighbors starts a new part without branching.
-    GREEDY_NEW_PART = 1 << 5
     # Of two parts a vertex can be added to, if the suffix neighbors of one contain
     # those of the other, it is only added to the first one.
-    PART_DOMINANCE = 1 << 6
+    PART_DOMINANCE = 1 << 5
     # A vertex is not added to a part if another vertex that can be added to it
     # has suffix neighbors contained in its own.
-    VERTEX_DOMINANCE = 1 << 7
+    VERTEX_DOMINANCE = 1 << 6
     # A vertex that can be added to an existing part doesn't start a new one.
-    NEW_PART_ONLY_IF_NEEDED = 1 << 8
+    NEW_PART_ONLY_IF_NEEDED = 1 << 7
     # A vertex doesn't start a new part if another vertex that can start it has
-    # suffix neighbors contained in its own.
-    NEW_PART_DOMINANCE = 1 << 9
+    # suffix neighbors contained in its own. This also makes a vertex without
+    # suffix neighbors the only one to start it, if there is one.
+    NEW_PART_DOMINANCE = 1 << 8
     # A vertex that another vertex unlocks is not branched on, see
     # `_ignore_unlocked_vertices` in the branch and bound.
-    UNLOCKING = 1 << 10
+    UNLOCKING = 1 << 9
 
 
 ALL_OPTIMIZATIONS = functools.reduce(operator.or_, Optimization)
