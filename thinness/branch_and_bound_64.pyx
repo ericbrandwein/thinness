@@ -95,6 +95,7 @@ cdef int _search(_Context ctx, int lower_bound, int upper_bound) except -2:
         parts_used=0,
         lower_bound=lower_bound,
         upper_bound=upper_bound,
+        last_vertex=-1,
     )
     sig_off()
     return solution
@@ -219,6 +220,7 @@ cdef int _branch_and_bound(
     int parts_used,
     int lower_bound,
     int upper_bound,
+    int last_vertex,
 ) noexcept:
     """Search for a solution that extends the current prefix.
 
@@ -227,10 +229,11 @@ cdef int _branch_and_bound(
     stops as soon as one with at most `lower_bound` parts is found. Returns the
     number of parts of the best solution found, which is stored in
     `ctx.best_order` and `ctx.best_partition`, or -1 if none was found.
+    `last_vertex` is the last vertex of the prefix, or -1 if it is empty.
     """
     ctx.nodes += 1
     cdef int entry_level = level
-    level = _increment_prefix_greedily_on_existing_parts(ctx, &suffix_vertices, level, parts_used)
+    level = _increment_prefix_greedily_on_existing_parts(ctx, &suffix_vertices, level, parts_used, last_vertex)
 
     if suffix_vertices == 0 and parts_used <= upper_bound:
         _copy_array(ctx.n, ctx.prefix, ctx.best_order)
@@ -588,6 +591,7 @@ cdef inline int _branch_with_vertex_on_part(
         parts_used,
         lower_bound,
         upper_bound,
+        vertex,
     )
 
     ctx.part_neighbors[part] = previous_part_neighbors
@@ -600,47 +604,96 @@ cdef inline int _increment_prefix_greedily_on_existing_parts(
     uint64_t* suffix_vertices,
     int level,
     int parts_used,
+    int last_vertex,
 ) noexcept:
     """Add to prefix all vertices that have the same suffix neighbors as one of the parts.
 
     Computes the suffix neighbors at `level`, and keeps them up to date as
     vertices leave the suffix. Returns the new length of the prefix.
+
+    The parent node already added every such vertex, so a vertex can only have
+    the same suffix neighbors as a part now if those of one of them changed
+    when `last_vertex` was added to the prefix. Those are the vertices adjacent
+    to `last_vertex`, its part, and the parts that had it as a suffix neighbor.
+    Each vertex added here changes them in the same way, so they are checked
+    until none is left. The part a vertex is added to is checked again too, as
+    another vertex may have the same suffix neighbors as it. `last_vertex` is -1
+    at the root, which has no parts.
+
+    A vertex that can be added stays so when others are added, as both its
+    suffix neighbors and those of the part lose the same vertices, so the
+    vertices added don't depend on the order in which they are checked.
     """
     _compute_suffix_neighbors(ctx, suffix_vertices[0], level, parts_used)
-    if not ctx.optimizations & _GREEDY_EXISTING_PART:
+    if not ctx.optimizations & _GREEDY_EXISTING_PART or last_vertex == -1:
         return level
     cdef uint64_t* vertex_neighbors = ctx.vertex_suffix_neighbors + level * ctx.n
     cdef uint64_t* part_neighbors = ctx.part_suffix_neighbors + level * ctx.max_parts
+    cdef uint64_t changed_vertices = ctx.graph[last_vertex] & suffix_vertices[0]
+    cdef uint64_t changed_parts = _bit(ctx.part_of[last_vertex])
     cdef int new_level = level
     cdef uint64_t rest
     cdef int vertex
     cdef int other_vertex
     cdef int part
-    cdef bint suffix_changed = True
-    while suffix_changed:
-        suffix_changed = False
-        vertex = _next(suffix_vertices[0], 0)
-        while vertex != -1:
+    for part in range(parts_used):
+        if ctx.part_neighbors[part] & _bit(last_vertex):
+            changed_parts |= _bit(part)
+
+    while changed_vertices != 0 or changed_parts != 0:
+        if changed_vertices != 0:
+            vertex = __builtin_ctzll(changed_vertices)
+            changed_vertices &= changed_vertices - 1
             part = _find_greedy_part_for_vertex(vertex_neighbors[vertex], part_neighbors, parts_used, vertex)
+        else:
+            part = __builtin_ctzll(changed_parts)
+            changed_parts &= changed_parts - 1
+            vertex = _find_greedy_vertex_for_part(ctx, part_neighbors[part], vertex_neighbors, suffix_vertices[0])
+        if vertex == -1 or part == -1:
+            continue
 
-            if part != -1:
-                suffix_vertices[0] &= ~_bit(vertex)
-                ctx.prefix[new_level] = vertex
-                ctx.part_of[vertex] = part
-                new_level += 1
-                suffix_changed = True
+        suffix_vertices[0] &= ~_bit(vertex)
+        ctx.prefix[new_level] = vertex
+        ctx.part_of[vertex] = part
+        new_level += 1
+        changed_parts |= _bit(part)
 
-                for part in range(parts_used):
-                    part_neighbors[part] &= ~_bit(vertex)
-                rest = suffix_vertices[0]
-                while rest != 0:
-                    other_vertex = __builtin_ctzll(rest)
-                    rest &= rest - 1
-                    vertex_neighbors[other_vertex] &= ~_bit(vertex)
-
-            vertex = _next(suffix_vertices[0], vertex + 1)
+        rest = ctx.graph[vertex] & suffix_vertices[0]
+        changed_vertices = (changed_vertices | rest) & suffix_vertices[0]
+        while rest != 0:
+            other_vertex = __builtin_ctzll(rest)
+            rest &= rest - 1
+            vertex_neighbors[other_vertex] &= ~_bit(vertex)
+        for part in range(parts_used):
+            if part_neighbors[part] & _bit(vertex):
+                part_neighbors[part] &= ~_bit(vertex)
+                changed_parts |= _bit(part)
 
     return new_level
+
+
+cdef inline int _find_greedy_vertex_for_part(
+    _Context ctx,
+    uint64_t part_neighbors,
+    uint64_t* vertex_neighbors,
+    uint64_t suffix_vertices,
+) noexcept:
+    """A suffix vertex with the same suffix neighbors as the part, ignoring itself, or -1.
+
+    Such a vertex is a suffix neighbor of the part or adjacent to all of them, so
+    if the part has any, only the first one and its neighbors are tried.
+    """
+    cdef uint64_t candidates = suffix_vertices
+    cdef int vertex
+    if part_neighbors != 0:
+        vertex = __builtin_ctzll(part_neighbors)
+        candidates &= ctx.graph[vertex] | _bit(vertex)
+    while candidates != 0:
+        vertex = __builtin_ctzll(candidates)
+        candidates &= candidates - 1
+        if part_neighbors & ~_bit(vertex) == vertex_neighbors[vertex]:
+            return vertex
+    return -1
 
 
 cdef inline int _find_greedy_part_for_vertex(

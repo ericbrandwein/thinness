@@ -194,6 +194,7 @@ def _search_with_bitsets(
         parts_used=0,
         lower_bound=lower_bound,
         upper_bound=upper_bound,
+        last_vertex=-1,
     )
     sig_off()
 
@@ -230,6 +231,9 @@ cdef class _Context:
     cdef binary_matrix_t other_new_part_candidates
     cdef binary_matrix_t unlockers
     cdef bitset_t ignored_vertices
+    cdef bitset_t greedy_changed_vertices
+    cdef bitset_t greedy_changed_parts
+    cdef bitset_t greedy_candidates
     cdef SeenStates seen_states
     cdef bitset_t canonical_vertices
     cdef int* best_order
@@ -276,6 +280,10 @@ cdef class _Context:
         binary_matrix_init(self.other_new_part_candidates, n, n)
         binary_matrix_init(self.unlockers, n, n)
         bitset_init(self.ignored_vertices, n)
+        # Scratch sets of the greedy step, which never runs while another one does.
+        bitset_init(self.greedy_changed_vertices, n)
+        bitset_init(self.greedy_changed_parts, max(max_parts, 1))
+        bitset_init(self.greedy_candidates, n)
 
         self.seen_states = SeenStates(self.all_vertices.limbs, max_parts, max_seen_entries)
 
@@ -309,6 +317,9 @@ cdef class _Context:
         binary_matrix_free(self.other_new_part_candidates)
         binary_matrix_free(self.unlockers)
         bitset_free(self.ignored_vertices)
+        bitset_free(self.greedy_changed_vertices)
+        bitset_free(self.greedy_changed_parts)
+        bitset_free(self.greedy_candidates)
         bitset_free(self.canonical_vertices)
         sig_free(self.best_order)
         sig_free(self.best_partition)
@@ -343,6 +354,7 @@ cdef int _branch_and_bound(
     int parts_used,
     int lower_bound,
     int upper_bound,
+    int last_vertex,
 ) noexcept:
     """Search for a solution that extends the current prefix.
 
@@ -351,13 +363,14 @@ cdef int _branch_and_bound(
     stops as soon as one with at most `lower_bound` parts is found. Returns the
     number of parts of the best solution found, which is stored in
     `ctx.best_order` and `ctx.best_partition`, or -1 if none was found.
+    `last_vertex` is the last vertex of the prefix, or -1 if it is empty.
     """
     ctx.nodes += 1
     cdef bitset_t new_suffix = ctx.new_suffixes.rows[level]
     bitset_copy(new_suffix, suffix_vertices)
 
     cdef int entry_level = level
-    level = _increment_prefix_greedily_on_existing_parts(ctx, new_suffix, level, parts_used)
+    level = _increment_prefix_greedily_on_existing_parts(ctx, new_suffix, level, parts_used, last_vertex)
 
     if bitset_isempty(new_suffix) and parts_used <= upper_bound:
         _copy_array(ctx.n, ctx.prefix, ctx.best_order)
@@ -760,6 +773,7 @@ cdef inline int _branch_with_vertex_on_part(
         parts_used,
         lower_bound,
         upper_bound,
+        vertex,
     )
 
     _undo_update_part_neighbors(
@@ -775,45 +789,101 @@ cdef inline int _increment_prefix_greedily_on_existing_parts(
     bitset_t suffix_vertices,
     int level,
     int parts_used,
+    int last_vertex,
 ) noexcept:
     """Add to prefix all vertices that have the same suffix neighbors as one of the parts.
 
     Computes the suffix neighbors at `level`, and keeps them up to date as
     vertices leave the suffix. Returns the new length of the prefix.
+
+    The parent node already added every such vertex, so a vertex can only have
+    the same suffix neighbors as a part now if those of one of them changed
+    when `last_vertex` was added to the prefix. Those are the vertices adjacent
+    to `last_vertex`, its part, and the parts that had it as a suffix neighbor.
+    Each vertex added here changes them in the same way, so they are checked
+    until none is left. The part a vertex is added to is checked again too, as
+    another vertex may have the same suffix neighbors as it. `last_vertex` is -1
+    at the root, which has no parts.
+
+    A vertex that can be added stays so when others are added, as both its
+    suffix neighbors and those of the part lose the same vertices, so the
+    vertices added don't depend on the order in which they are checked.
     """
     _compute_suffix_neighbors(ctx, suffix_vertices, level, parts_used)
-    if not ctx.optimizations & _GREEDY_EXISTING_PART:
+    if not ctx.optimizations & _GREEDY_EXISTING_PART or last_vertex == -1:
         return level
     cdef bitset_t* vertex_neighbors = ctx.vertex_suffix_neighbors[level].rows
     cdef bitset_t* part_neighbors = ctx.part_suffix_neighbors[level].rows
     cdef int new_level = level
-    cdef int vertex
-    cdef int other_vertex
-    cdef int part
-    cdef bint suffix_changed = True
-    while suffix_changed:
-        suffix_changed = False
-        vertex = bitset_next(suffix_vertices, 0)
-        while vertex != -1:
+    cdef long vertex
+    cdef long other_vertex
+    cdef long part
+
+    bitset_intersection(ctx.greedy_changed_vertices, ctx.graph.rows[last_vertex], suffix_vertices)
+    bitset_clear(ctx.greedy_changed_parts)
+    bitset_add(ctx.greedy_changed_parts, ctx.part_of[last_vertex])
+    for part in range(parts_used):
+        if bitset_in(ctx.part_neighbors.rows[part], last_vertex):
+            bitset_add(ctx.greedy_changed_parts, part)
+
+    while True:
+        vertex = bitset_first(ctx.greedy_changed_vertices)
+        if vertex != -1:
+            bitset_discard(ctx.greedy_changed_vertices, vertex)
             part = _find_greedy_part_for_vertex(vertex_neighbors[vertex], part_neighbors, parts_used, vertex)
+        else:
+            part = bitset_first(ctx.greedy_changed_parts)
+            if part == -1:
+                break
+            bitset_discard(ctx.greedy_changed_parts, part)
+            vertex = _find_greedy_vertex_for_part(ctx, part_neighbors[part], vertex_neighbors, suffix_vertices)
+        if vertex == -1 or part == -1:
+            continue
 
-            if part != -1:
-                bitset_discard(suffix_vertices, vertex)
-                ctx.prefix[new_level] = vertex
-                ctx.part_of[vertex] = part
-                new_level += 1
-                suffix_changed = True
+        bitset_discard(suffix_vertices, vertex)
+        ctx.prefix[new_level] = vertex
+        ctx.part_of[vertex] = part
+        new_level += 1
+        bitset_add(ctx.greedy_changed_parts, part)
 
-                for part in range(parts_used):
-                    bitset_discard(part_neighbors[part], vertex)
-                other_vertex = bitset_next(suffix_vertices, 0)
-                while other_vertex != -1:
-                    bitset_discard(vertex_neighbors[other_vertex], vertex)
-                    other_vertex = bitset_next(suffix_vertices, other_vertex + 1)
-
-            vertex = bitset_next(suffix_vertices, vertex + 1)
+        other_vertex = bitset_next(ctx.graph.rows[vertex], 0)
+        while other_vertex != -1:
+            if bitset_in(suffix_vertices, other_vertex):
+                bitset_discard(vertex_neighbors[other_vertex], vertex)
+                bitset_add(ctx.greedy_changed_vertices, other_vertex)
+            other_vertex = bitset_next(ctx.graph.rows[vertex], other_vertex + 1)
+        bitset_intersection(ctx.greedy_changed_vertices, ctx.greedy_changed_vertices, suffix_vertices)
+        for part in range(parts_used):
+            if bitset_in(part_neighbors[part], vertex):
+                bitset_discard(part_neighbors[part], vertex)
+                bitset_add(ctx.greedy_changed_parts, part)
 
     return new_level
+
+
+cdef inline long _find_greedy_vertex_for_part(
+    _Context ctx,
+    bitset_t part_neighbors,
+    bitset_t* vertex_neighbors,
+    bitset_t suffix_vertices,
+) noexcept:
+    """A suffix vertex with the same suffix neighbors as the part, ignoring itself, or -1.
+
+    Such a vertex is a suffix neighbor of the part or adjacent to all of them, so
+    if the part has any, only the first one and its neighbors are tried.
+    """
+    cdef long vertex = bitset_first(part_neighbors)
+    if vertex == -1:
+        bitset_copy(ctx.greedy_candidates, suffix_vertices)
+    else:
+        bitset_intersection(ctx.greedy_candidates, ctx.graph.rows[vertex], suffix_vertices)
+        bitset_add(ctx.greedy_candidates, vertex)
+    vertex = bitset_next(ctx.greedy_candidates, 0)
+    while vertex != -1:
+        if _is_equal_ignoring(part_neighbors, vertex_neighbors[vertex], vertex):
+            return vertex
+        vertex = bitset_next(ctx.greedy_candidates, vertex + 1)
+    return -1
 
 
 cdef inline int _find_greedy_part_for_vertex(
