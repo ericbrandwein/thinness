@@ -129,8 +129,14 @@ class TestBranchAndBound(unittest.TestCase):
 
     def test_statistics_count_the_nodes_searched(self):
         statistics = {}
-        calculate_proper_thinness(graphs.CycleGraph(6), statistics=statistics)
+        # Without the heuristic, the search can't be skipped by finding a solution with the thinness.
+        calculate_proper_thinness(
+            graphs.CycleGraph(6),
+            optimizations=ALL_OPTIMIZATIONS & ~Optimization.HEURISTIC_UPPER_BOUND,
+            statistics=statistics,
+        )
         self.assertGreater(statistics['nodes'], 0)
+        self.assertGreater(statistics['thinness_nodes'], 0)
 
     def test_proper_thinness_without_optimizations(self):
         set_random_seed(0)
