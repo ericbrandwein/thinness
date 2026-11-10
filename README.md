@@ -9,18 +9,27 @@ Includes two exact algorithms:
 Both calculate the thinness and the proper thinness. The B&B algorithm is much faster than the other one.
 
 ## Classification of small graphs
-The minimal graphs for each thinness and proper thinness value for graphs with up to 10 vertices can be found in the CSV files in [data/](data/). A graph is minimal if every proper induced subgraph has a smaller value.
+The minimal graphs for each thinness and proper thinness value for graphs with up to 11 vertices are published in Zenodo: <!-- TODO: DOI -->. A graph is minimal if every proper induced subgraph has a smaller value.
 
 They are generated with [minimal_graphs](minimal_graphs/):
 
 ```bash
-pipenv run python -m minimal_graphs.generate 10
-pipenv run python -m minimal_graphs.compare
+pipenv run python -m minimal_graphs.generate 11
 ```
 
-The first command writes the lists to `data/generated/`, and the second one compares them with the ones in `data/`, up to isomorphism. As both parameters are hereditary, a graph is minimal if its value is larger than the values of the graphs obtained by removing one of its vertices, which are looked up in tables of the smaller orders. The tables also keep an optimal order of each graph for the proper thinness, so the proper thinness of most graphs is found by inserting a vertex in the order of a graph without it. The graphs with 10 vertices take about 40 CPU minutes. It needs nauty (`geng` and its library), which comes with SageMath.
+It writes the lists to `data/generated/`, as CSV files with the graph6 of each graph. As both parameters are hereditary, a graph is minimal if its value is larger than the values of the graphs obtained by removing one of its vertices, which are looked up in tables of the smaller orders. The tables also keep an optimal order of each graph for the proper thinness, so the proper thinness of most graphs is found by inserting a vertex in the order of a graph without it. The graphs with 10 vertices take about 40 CPU minutes, and the ones with 11 vertices about 79 CPU hours. It needs nauty (`geng` and its library), which comes with SageMath.
 
-Removing a vertex lowers the thinness by at most one, but it can lower the proper thinness by two: `I?BvUqw]?` and `IUZurzmmo` have proper thinness 5, and removing any of their vertices leaves a graph with proper thinness 3. They are the only such graphs with up to 10 vertices.
+[thinness/data.py](thinness/data.py) reads the lists, either the generated ones or the ones from Zenodo, compressed with xz or not. By default, they are read from `data/generated/`:
+
+```python
+from thinness.data import load_graphs_by_thinness, load_graphs_by_proper_thinness
+
+# For each value, the minimal graphs with up to 9 vertices, as Sage graphs.
+graphs_by_thinness = load_graphs_by_thinness(9)
+graphs_by_proper_thinness = load_graphs_by_proper_thinness(9, directory='path/to/the/lists')
+```
+
+Removing a vertex lowers the thinness by at most one, but it can lower the proper thinness by two: `I?BvUqw]?` and `IUZurzmmo` have proper thinness 5, and removing any of their vertices leaves a graph with proper thinness 3. With 11 vertices, `JEnfnZ{}r}?`, `JEnfnZ{}rv?` and `JUZurzm}t}?` have proper thinness 6, and removing any of their vertices leaves a graph with proper thinness at most 4. They are the only such graphs with up to 11 vertices.
 
 ## Requirements
 - Python >=3.10

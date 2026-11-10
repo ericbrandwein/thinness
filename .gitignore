@@ -1,7 +1,6 @@
 __pycache__/
 *.sage.py
 data/images/
-data/last-processed.index
 *.prof
 *.egg-info
 src/build/

@@ -6,7 +6,7 @@ import numpy as np
 from sage.graphs.graph import Graph
 from sage.graphs.graph_generators import graphs
 
-from minimal_graphs import compare, generate
+from minimal_graphs import generate
 from minimal_graphs.classify import canonical_form_of_graph6
 from thinness.branch_and_bound import calculate_thinness
 from proper_thinness.branch_and_bound import calculate_proper_thinness
@@ -53,6 +53,3 @@ class TestGenerate(unittest.TestCase):
                 with self.subTest(graph=graph.graph6_string()):
                     self.assertEqual(sorted(vertex_order), list(range(order)))
                     self.assertEqual(solution_from_order(graph, vertex_order).thinness, key & 15)
-
-    def test_minimal_graphs_match_the_data(self):
-        self.assertTrue(compare.compare(self.directory.name))

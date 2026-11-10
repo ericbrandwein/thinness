@@ -15,8 +15,8 @@ For each order k it writes to the output directory:
 - `order-k.csv`: the minimal graphs of order k, as rows graph6,parameter,value.
 - `order-k.json`: the number of graphs, the ones whose proper thinness is more
   than one above the largest without a vertex, and the seconds taken.
-At the end, `thinness-v.csv` and `proper-thinness-v.csv` have the minimal graphs
-of value v of every order, in the same format as the ones in `data`.
+At the end, `thinness-v.csv` and `proper-thinness-v.csv` have the graph6 of the
+minimal graphs of value v of every order, under the header `graph6`.
 
 geng generates the graphs of each order in chunks with its res/mod argument.
 Orders and chunks whose files exist are skipped, so an interrupted run resumes
@@ -184,8 +184,8 @@ def _write_lists(output_dir: str, max_order: int):
                 if (parameter, value) not in files:
                     path = os.path.join(output_dir, f'{parameter}-{value}.csv')
                     files[parameter, value] = stack.enter_context(_atomic_open(path, 'w'))
-                    files[parameter, value].write('graph6,name,hog\n')
-                files[parameter, value].write(f'{graph6},,\n')
+                    files[parameter, value].write('graph6\n')
+                files[parameter, value].write(f'{graph6}\n')
 
 
 def _read_minimal_rows(output_dir: str, order: int) -> Iterator[tuple[str, str, int]]:
