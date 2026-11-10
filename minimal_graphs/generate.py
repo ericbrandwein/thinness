@@ -25,12 +25,15 @@ where it stopped.
 import argparse
 import array
 import collections
+import contextlib
 import json
+import mmap
 import multiprocessing
 import os
 import shutil
 import subprocess
 import time
+from collections.abc import Iterator
 
 import numpy as np
 
@@ -83,13 +86,18 @@ def _generate_order(output_dir: str, order: int, mod: int, processes: int):
     shutil.rmtree(chunk_dir)
 
 
-def _load_classifier(output_dir: str, order: int):
-    global _classifier
+def load_tables(output_dir: str, order: int) -> dict[int, mmap.mmap]:
+    """The tables needed for the graphs of the order, mapped to memory so that processes share them."""
     tables = {}
     for smaller_order in range(1, order):
         with open(_order_path(output_dir, smaller_order, 'table'), 'rb') as file:
-            tables[smaller_order] = file.read()
-    _classifier = Classifier(tables)
+            tables[smaller_order] = mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ)
+    return tables
+
+
+def _load_classifier(output_dir: str, order: int):
+    global _classifier
+    _classifier = Classifier(load_tables(output_dir, order))
 
 
 def _classify_chunk(chunk: tuple[str, int, int, int]):
@@ -102,10 +110,11 @@ def _classify_chunk(chunk: tuple[str, int, int, int]):
     geng = subprocess.Popen(['geng', '-cq', str(order), f'{res}/{mod}'], stdout=subprocess.PIPE)
     for line in geng.stdout:
         graph6 = line.rstrip(b'\n')
-        form, thinness, proper_thinness, largest_thinness, largest_proper_thinness = _classifier.classify(graph6)
+        key, packed_order, thinness, proper_thinness, largest_thinness, largest_proper_thinness = _classifier.classify(graph6)
         graphs += 1
         if order < MAX_ORDER:
-            table.append(form << 8 | thinness << 4 | proper_thinness)
+            table.append(key)
+            table.append(packed_order)
         # K1 is the only minimal graph of value 1, so it isn't listed, as in `data`.
         if thinness > max(largest_thinness, 1):
             rows.append(f'{graph6.decode()},{THINNESS},{thinness}\n')
@@ -132,8 +141,10 @@ def _classify_chunk(chunk: tuple[str, int, int, int]):
 def _merge_chunks(output_dir: str, chunk_dir: str, order: int, mod: int):
     if order < MAX_ORDER:
         tables = [np.fromfile(_chunk_path(chunk_dir, res, mod, 'table'), dtype=np.uint64) for res in range(mod)]
+        # Pairs of words, sorted by the first one.
+        entries = np.concatenate(tables).reshape(-1, 2)
         with _atomic_open(_order_path(output_dir, order, 'table'), 'wb') as file:
-            np.sort(np.concatenate(tables)).tofile(file)
+            entries[np.argsort(entries[:, 0])].tofile(file)
 
     with _atomic_open(_order_path(output_dir, order, 'csv'), 'w') as file:
         for res in range(mod):
@@ -165,24 +176,24 @@ def _print_order_stats(output_dir: str, order: int):
 
 
 def _write_lists(output_dir: str, max_order: int):
-    lists = collections.defaultdict(list)
-    for order in range(1, max_order + 1):
-        for graph6, parameter, value in _read_minimal_rows(output_dir, order):
-            lists[parameter, value].append(graph6)
-    for (parameter, value), graph6s in lists.items():
-        with _atomic_open(os.path.join(output_dir, f'{parameter}-{value}.csv'), 'w') as file:
-            file.write('graph6,name,hog\n')
-            file.writelines(f'{graph6},,\n' for graph6 in graph6s)
+    # Written as the rows are read, as there may be too many to keep in memory.
+    with contextlib.ExitStack() as stack:
+        files = {}
+        for order in range(1, max_order + 1):
+            for graph6, parameter, value in _read_minimal_rows(output_dir, order):
+                if (parameter, value) not in files:
+                    path = os.path.join(output_dir, f'{parameter}-{value}.csv')
+                    files[parameter, value] = stack.enter_context(_atomic_open(path, 'w'))
+                    files[parameter, value].write('graph6,name,hog\n')
+                files[parameter, value].write(f'{graph6},,\n')
 
 
-def _read_minimal_rows(output_dir: str, order: int) -> list[tuple[str, str, int]]:
+def _read_minimal_rows(output_dir: str, order: int) -> Iterator[tuple[str, str, int]]:
     """The graph6, parameter and value of each minimal graph of the order."""
-    rows = []
     with open(_order_path(output_dir, order, 'csv')) as file:
         for line in file:
             graph6, parameter, value = line.rstrip('\n').split(',')
-            rows.append((graph6, parameter, int(value)))
-    return rows
+            yield graph6, parameter, int(value)
 
 
 def _order_path(output_dir: str, order: int, extension: str) -> str:

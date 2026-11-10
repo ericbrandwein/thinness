@@ -57,15 +57,20 @@ cdef int search_words(
     int upper_bound,
     int max_prefix_length,
     int max_seen_entries,
+    int* best_order,
 ) except -2:
-    """Same as `search`, for a graph given by the neighbors of each vertex, without the solution.
+    """Same as `search`, for a graph given by the neighbors of each vertex.
 
     `canonical_vertices` has one vertex of each orbit of the automorphism group.
+    The order of the solution found is written to `best_order`.
     """
     cdef _Context ctx = _Context(n, upper_bound, max_prefix_length, max_seen_entries)
     memcpy(ctx.graph, graph, n * sizeof(uint64_t))
     ctx.canonical_vertices = canonical_vertices
-    return _search(ctx, lower_bound, upper_bound)
+    cdef int solution = _search(ctx, lower_bound, upper_bound)
+    if solution != -1:
+        memcpy(best_order, ctx.best_order, n * sizeof(int))
+    return solution
 
 
 cdef int _search(_Context ctx, int lower_bound, int upper_bound) except -2:

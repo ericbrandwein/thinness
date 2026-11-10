@@ -6,14 +6,17 @@ Graphs are stored as the neighbors of each vertex, in 64-bit words. Their
 canonical form, computed with nauty, is the set of edges of the canonically
 labelled graph, packed into a word with one bit per pair of vertices.
 
-The values of the connected graphs of each order are kept in a table sorted by
-canonical form, with one word per graph: its canonical form << 8 | its thinness
-<< 4 | its proper thinness. So graphs can have at most 11 vertices, as 55 bits
-of pairs plus 8 bits of values fit in a word.
+The connected graphs of each order are kept in a table sorted by canonical form,
+with two words per graph:
+- its canonical form << 8 | its thinness << 4 | its proper thinness. So graphs
+  can have at most 11 vertices, as 55 bits of pairs plus 8 bits of values fit
+  in a word.
+- the order of an optimal solution for its proper thinness, with 4 bits per
+  vertex, which is its canonical label: its position in the canonically
+  labelled graph. So it is an order of any graph with the same canonical form.
 """
 from libc.stdint cimport uint64_t
 from libc.string cimport memcpy
-from cysignals.memory cimport sig_malloc, sig_free
 
 from thinness.branch_and_bound_64 cimport search_words as thinness_search
 from proper_thinness.branch_and_bound_64 cimport search_words as proper_thinness_search
@@ -30,10 +33,11 @@ cdef extern from *:
         nauty_check(WORDSIZE, 1, n, NAUTYVERSIONID);
     }
 
-    /* The canonical form of the graph with the given neighbors, and the orbits of its automorphism group. */
-    static uint64_t canonical_form(const uint64_t* neighbors, int n, int* orbits) {
+    /* The canonical form of the graph with the given neighbors, the orbits of its
+       automorphism group, and the vertex of each canonical label. */
+    static uint64_t canonical_form(const uint64_t* neighbors, int n, int* orbits, int* labelling) {
         graph g[MAXN], canonical[MAXN];
-        int lab[MAXN], ptn[MAXN];
+        int ptn[MAXN];
         static DEFAULTOPTIONS_GRAPH(options);
         statsblk stats;
         options.getcanon = TRUE;
@@ -43,7 +47,7 @@ cdef extern from *:
                 if ((neighbors[i] >> j) & 1)
                     ADDELEMENT(GRAPHROW(g, i, 1), j);
         }
-        densenauty(g, lab, ptn, orbits, &options, &stats, 1, n, canonical);
+        densenauty(g, labelling, ptn, orbits, &options, &stats, 1, n, canonical);
         uint64_t form = 0;
         int pair = 0;
         for (int j = 1; j < n; j++)
@@ -54,7 +58,7 @@ cdef extern from *:
     }
     """
     void check_nauty(int n)
-    uint64_t canonical_form(const uint64_t* neighbors, int n, int* orbits)
+    uint64_t canonical_form(const uint64_t* neighbors, int n, int* orbits, int* labelling)
 
 
 cdef extern from *:
@@ -63,6 +67,7 @@ cdef extern from *:
 
 cdef enum:
     _MAX_ORDER = 11
+    _MAX_ORDER_SQUARED = 121
 
 MAX_ORDER = _MAX_ORDER
 # The searches are small, so the memo never needs to be large.
@@ -71,111 +76,77 @@ cdef int MAX_SEEN_ENTRIES = 100_000
 check_nauty(_MAX_ORDER)
 
 
-# PROFILING: seconds and calls of each stage of `classify`, and how many searches found no solution.
-from posix.time cimport clock_gettime, timespec, CLOCK_MONOTONIC
-
-cdef enum:
-    STAGE_CANONICAL_FORM
-    STAGE_SMALLER_GRAPHS
-    STAGE_THINNESS_SEARCH
-    STAGE_PROPER_THINNESS_SEARCH
-    STAGE_PROPER_THINNESS_SECOND_SEARCH
-    STAGES
-
-STAGE_NAMES = [
-    'canonical form', 'smaller graphs', 'thinness search',
-    'proper thinness search', 'proper thinness second search',
-]
-cdef double _seconds[STAGES]
-cdef long _calls[STAGES]
-cdef long _failures[STAGES]
-
-
-cdef inline double _now() noexcept:
-    cdef timespec time
-    clock_gettime(CLOCK_MONOTONIC, &time)
-    return time.tv_sec + time.tv_nsec * 1e-9
-
-
-cdef inline double _record(int stage, double start) noexcept:
-    cdef double now = _now()
-    _seconds[stage] += now - start
-    _calls[stage] += 1
-    return now
-
-
-def stage_stats() -> list[tuple[str, float, int, int]]:
-    """The name, seconds, calls and searches without solution of each stage."""
-    return [(STAGE_NAMES[stage], _seconds[stage], _calls[stage], _failures[stage]) for stage in range(STAGES)]
-
-
 def canonical_form_of_graph6(bytes graph6) -> tuple[int, int]:
     """The order and the canonical form of the graph."""
     cdef uint64_t neighbors[_MAX_ORDER]
     cdef int orbits[_MAX_ORDER]
+    cdef int labelling[_MAX_ORDER]
     cdef int n = _decode_graph6(graph6, neighbors)
-    return n, canonical_form(neighbors, n, orbits)
+    return n, canonical_form(neighbors, n, orbits, labelling)
 
 
 cdef class Classifier:
     """Computes the values of connected graphs from the tables of the smaller orders."""
     cdef uint64_t* tables[_MAX_ORDER + 1]
     cdef size_t table_sizes[_MAX_ORDER + 1]
+    # The objects holding the tables, kept alive while their memory is used.
+    cdef list buffers
 
     def __cinit__(self, dict tables):
-        """`tables` maps orders to the bytes of their tables.
+        """`tables` maps orders to buffers with their tables, such as memory maps of their files.
 
         Graphs of order n need the tables of every order below n.
         """
         cdef int order
-        cdef bytes table
+        cdef const unsigned char[::1] view
         for order in range(_MAX_ORDER + 1):
             self.tables[order] = NULL
             self.table_sizes[order] = 0
+        self.buffers = []
         for order, table in tables.items():
             if not 1 <= order <= _MAX_ORDER:
                 raise ValueError(f'Tables must be of orders 1 to {MAX_ORDER}')
-            self.tables[order] = <uint64_t*>sig_malloc(max(len(table), 1))
-            if self.tables[order] == NULL:
-                raise MemoryError
-            memcpy(self.tables[order], <const char*>table, len(table))
-            self.table_sizes[order] = len(table) // sizeof(uint64_t)
+            view = table
+            if view.shape[0] == 0 or view.shape[0] % (2 * sizeof(uint64_t)) != 0:
+                raise ValueError(f'The table of order {order} has a wrong size')
+            self.buffers.append(table)
+            # They are never written to.
+            self.tables[order] = <uint64_t*>&view[0]
+            self.table_sizes[order] = view.shape[0] // (2 * sizeof(uint64_t))
 
-    def __dealloc__(self):
-        cdef int order
-        for order in range(_MAX_ORDER + 1):
-            sig_free(self.tables[order])
-
-    def classify(self, bytes graph6) -> tuple[int, int, int, int, int]:
-        """The canonical form, thinness and proper thinness of the connected graph, and the largest ones without a vertex.
+    def classify(self, bytes graph6) -> tuple[int, int, int, int, int, int]:
+        """The two words of the connected graph in its table, its thinness and proper thinness, and the largest ones without a vertex.
 
         The graph is minimal for a parameter if its value is larger than the
         largest one without a vertex.
         """
         cdef uint64_t neighbors[_MAX_ORDER]
         cdef int orbits[_MAX_ORDER]
-        cdef double start = _now()  # PROFILING
+        cdef int labelling[_MAX_ORDER]
         cdef int n = _decode_graph6(graph6, neighbors)
-        cdef uint64_t form = canonical_form(neighbors, n, orbits)
+        cdef uint64_t form = canonical_form(neighbors, n, orbits, labelling)
         cdef uint64_t canonical_vertices = 0
         cdef int vertex
         for vertex in range(n):
             if orbits[vertex] == vertex:
                 canonical_vertices |= _bit(vertex)
-        start = _record(STAGE_CANONICAL_FORM, start)  # PROFILING
 
+        # The order of an optimal solution without each vertex, one after the other.
+        cdef int orders_without_vertex[_MAX_ORDER_SQUARED]
         cdef int largest_thinness = 0
         cdef int largest_proper_thinness = 0
         cdef int values
         for vertex in range(n):
-            values = self._values_without_vertex(neighbors, n, vertex)
+            values = self._values_without_vertex(neighbors, n, vertex, orders_without_vertex + vertex * (n - 1))
             largest_thinness = max(largest_thinness, values >> 4)
             largest_proper_thinness = max(largest_proper_thinness, values & 15)
-        start = _record(STAGE_SMALLER_GRAPHS, start)  # PROFILING
 
         cdef int thinness = 1
         cdef int proper_thinness = 1
+        cdef int best_order[_MAX_ORDER]
         cdef int lower_bound
+        cdef int heuristic_proper_thinness
+        best_order[0] = 0
         if n > 1:
             # Removing a vertex lowers the thinness by at most one, as putting it
             # first in a part of its own gives a solution.
@@ -185,46 +156,56 @@ cdef class Classifier:
             )
             if thinness == -1:
                 thinness = largest_thinness + 1
-                _failures[STAGE_THINNESS_SEARCH] += 1  # PROFILING
-            start = _record(STAGE_THINNESS_SEARCH, start)  # PROFILING
 
-            # It can lower the proper thinness by more than one (see the README),
-            # so if the bound isn't reached, the search looks for the best solution.
+            # It can lower the proper thinness by more than one (see the README), so
+            # the bound may not be reached. But it almost always is, and the
+            # heuristic usually finds such a solution much faster than the search.
             lower_bound = max(thinness, largest_proper_thinness)
-            proper_thinness = proper_thinness_search(
-                neighbors, n, canonical_vertices,
-                lower_bound, lower_bound, n, MAX_SEEN_ENTRIES,
+            heuristic_proper_thinness = _insertion_heuristic(
+                neighbors, n, orders_without_vertex, lower_bound, best_order,
             )
-            if proper_thinness == -1:
-                _failures[STAGE_PROPER_THINNESS_SEARCH] += 1  # PROFILING
-            start = _record(STAGE_PROPER_THINNESS_SEARCH, start)  # PROFILING
-            if proper_thinness == -1:
+            proper_thinness = heuristic_proper_thinness
+            if heuristic_proper_thinness > lower_bound:
                 proper_thinness = proper_thinness_search(
                     neighbors, n, canonical_vertices,
-                    lower_bound + 1, n, n, MAX_SEEN_ENTRIES,
+                    lower_bound, heuristic_proper_thinness - 1, n, MAX_SEEN_ENTRIES, best_order,
                 )
-                start = _record(STAGE_PROPER_THINNESS_SECOND_SEARCH, start)  # PROFILING
-            if proper_thinness == -1:
-                raise RuntimeError(f'No proper thinness found for {graph6}')
+                if proper_thinness == -1:
+                    proper_thinness = heuristic_proper_thinness
 
-        return form, thinness, proper_thinness, largest_thinness, largest_proper_thinness
+        return (
+            form << 8 | thinness << 4 | proper_thinness,
+            _pack_order(best_order, n, labelling),
+            thinness,
+            proper_thinness,
+            largest_thinness,
+            largest_proper_thinness,
+        )
 
-    cdef int _values_without_vertex(self, const uint64_t* neighbors, int n, int vertex) except -1:
+    cdef int _values_without_vertex(self, const uint64_t* neighbors, int n, int vertex, int* order) except -1:
         """The values of the graph without `vertex`, as thinness << 4 | proper thinness.
 
-        They are the largest ones of its components.
+        They are the largest ones of its components. The optimal orders of the
+        components for the proper thinness are written to `order` one after the
+        other, which is an optimal order of the graph, as there are no conflicts
+        between vertices of different components.
         """
         cdef uint64_t remaining = _lower_bits(n) & ~_bit(vertex)
         cdef uint64_t component
         cdef uint64_t frontier
         cdef uint64_t added
         cdef uint64_t component_neighbors[_MAX_ORDER]
+        cdef int component_vertices[_MAX_ORDER]
         cdef int orbits[_MAX_ORDER]
+        cdef int labelling[_MAX_ORDER]
+        cdef uint64_t packed_order
         cdef int thinness = 0
         cdef int proper_thinness = 0
-        cdef int order
+        cdef int length = 0
+        cdef int component_order
         cdef int values
         cdef int u
+        cdef int i
         while remaining != 0:
             component = remaining & (~remaining + 1)
             frontier = component
@@ -236,14 +217,21 @@ cdef class Classifier:
                 frontier |= added
             remaining &= ~component
 
-            order = _induced_subgraph(neighbors, component, component_neighbors)
-            values = self._lookup(order, canonical_form(component_neighbors, order, orbits))
+            component_order = _induced_subgraph(neighbors, component, component_neighbors, component_vertices)
+            values = self._lookup(
+                component_order,
+                canonical_form(component_neighbors, component_order, orbits, labelling),
+                &packed_order,
+            )
             thinness = max(thinness, values >> 4)
             proper_thinness = max(proper_thinness, values & 15)
+            for i in range(component_order):
+                order[length] = component_vertices[labelling[(packed_order >> (4 * i)) & 15]]
+                length += 1
         return thinness << 4 | proper_thinness
 
-    cdef int _lookup(self, int order, uint64_t form) except -1:
-        """The values of a connected graph in the table of its order, by binary search."""
+    cdef int _lookup(self, int order, uint64_t form, uint64_t* packed_order) except -1:
+        """The values of a connected graph in the table of its order, by binary search, and its packed order."""
         cdef const uint64_t* table = self.tables[order]
         cdef size_t size = self.table_sizes[order]
         cdef uint64_t key = form << 8
@@ -252,17 +240,140 @@ cdef class Classifier:
         cdef size_t middle
         while low < high:
             middle = (low + high) // 2
-            if table[middle] < key:
+            if table[2 * middle] < key:
                 low = middle + 1
             else:
                 high = middle
-        if low == size or table[low] >> 8 != form:
+        if low == size or table[2 * low] >> 8 != form:
             raise KeyError(f'Graph of order {order} not in the tables')
-        return table[low] & 0xff
+        packed_order[0] = table[2 * low + 1]
+        return table[2 * low] & 0xff
 
 
-cdef int _induced_subgraph(const uint64_t* neighbors, uint64_t vertices, uint64_t* subgraph_neighbors) noexcept:
-    """Writes the neighbors of the subgraph induced by `vertices`, relabelled in order from 0, and returns its order."""
+cdef int _insertion_heuristic(
+    const uint64_t* neighbors,
+    int n,
+    const int* orders_without_vertex,
+    int lower_bound,
+    int* best_order,
+) noexcept:
+    """The fewest parts of a solution for the proper thinness among the orders with each vertex inserted in the order without it.
+
+    It stops when one reaches `lower_bound`, and writes the best order found to
+    `best_order`. Some optimal order of the graph is one without a vertex with that
+    vertex inserted somewhere, so these orders often reach the proper thinness.
+    """
+    # Any order has a solution with a part for each vertex.
+    cdef int best = n
+    cdef int order[_MAX_ORDER]
+    cdef const int* order_without_vertex
+    cdef int vertex
+    cdef int position
+    cdef int parts
+    for vertex in range(n):
+        best_order[vertex] = vertex
+    for vertex in range(n):
+        order_without_vertex = orders_without_vertex + vertex * (n - 1)
+        order[0] = vertex
+        memcpy(order + 1, order_without_vertex, (n - 1) * sizeof(int))
+        for position in range(n):
+            if position > 0:
+                # Moves the vertex one position later.
+                order[position - 1] = order_without_vertex[position - 1]
+                order[position] = vertex
+            parts = _proper_parts_for_order(neighbors, n, order)
+            if parts < best:
+                best = parts
+                memcpy(best_order, order, n * sizeof(int))
+                if best <= lower_bound:
+                    return best
+    return best
+
+
+cdef uint64_t _pack_order(const int* order, int n, const int* labelling) noexcept:
+    """The order as the canonical label of each vertex, with 4 bits each."""
+    cdef int canonical_label[_MAX_ORDER]
+    cdef uint64_t packed = 0
+    cdef int i
+    for i in range(n):
+        canonical_label[labelling[i]] = i
+    for i in range(n):
+        packed |= (<uint64_t>canonical_label[order[i]]) << (4 * i)
+    return packed
+
+
+cdef int _proper_parts_for_order(const uint64_t* neighbors, int n, const int* order) noexcept:
+    """The fewest parts of a solution for the proper thinness consistent with `order`.
+
+    Same as `proper_thinness.heuristic.solution_from_order`, without the partition:
+    the positions minus a maximum matching between earlier and later positions
+    that don't conflict.
+    """
+    cdef int position[_MAX_ORDER]
+    cdef uint64_t ordered_neighbors[_MAX_ORDER]
+    cdef uint64_t compatible_later[_MAX_ORDER]
+    cdef int previous[_MAX_ORDER]
+    cdef uint64_t vertex_neighbors
+    cdef uint64_t visited
+    cdef int i
+    cdef int j
+    cdef int matched = 0
+    for i in range(n):
+        position[order[i]] = i
+    for i in range(n):
+        ordered_neighbors[i] = 0
+        vertex_neighbors = neighbors[order[i]]
+        while vertex_neighbors != 0:
+            ordered_neighbors[i] |= _bit(position[__builtin_ctzll(vertex_neighbors)])
+            vertex_neighbors &= vertex_neighbors - 1
+
+    # The positions i < j conflict if some vertex after j is adjacent to the one
+    # at i but not to the one at j, or some vertex before i is adjacent to the one
+    # at j but not to the one at i.
+    for i in range(n):
+        compatible_later[i] = 0
+        for j in range(i + 1, n):
+            if (
+                ordered_neighbors[i] & ~ordered_neighbors[j] & ~_lower_bits(j + 1) == 0
+                and ordered_neighbors[j] & ~ordered_neighbors[i] & _lower_bits(i) == 0
+            ):
+                compatible_later[i] |= _bit(j)
+
+    for i in range(n):
+        previous[i] = -1
+    for i in range(n):
+        visited = 0
+        if _augment(i, compatible_later, previous, &visited):
+            matched += 1
+    return n - matched
+
+
+cdef bint _augment(int position, const uint64_t* compatible_later, int* previous, uint64_t* visited) noexcept:
+    """Whether an augmenting path from `position` was found, in which case it is applied to `previous`."""
+    cdef uint64_t candidates = compatible_later[position]
+    cdef int next_position
+    while candidates != 0:
+        next_position = __builtin_ctzll(candidates)
+        candidates &= candidates - 1
+        if visited[0] & _bit(next_position):
+            continue
+        visited[0] |= _bit(next_position)
+        if previous[next_position] == -1 or _augment(previous[next_position], compatible_later, previous, visited):
+            previous[next_position] = position
+            return True
+    return False
+
+
+cdef int _induced_subgraph(
+    const uint64_t* neighbors,
+    uint64_t vertices,
+    uint64_t* subgraph_neighbors,
+    int* subgraph_vertices,
+) noexcept:
+    """Writes the neighbors of the subgraph induced by `vertices`, relabelled in order from 0, and returns its order.
+
+    The vertex of the graph with each label of the subgraph is written to `subgraph_vertices`.
+    """
     cdef int position[_MAX_ORDER]
     cdef int order = 0
     cdef uint64_t rest = vertices
@@ -273,6 +384,7 @@ cdef int _induced_subgraph(const uint64_t* neighbors, uint64_t vertices, uint64_
         u = __builtin_ctzll(rest)
         rest &= rest - 1
         position[u] = order
+        subgraph_vertices[order] = u
         order += 1
     rest = vertices
     while rest != 0:

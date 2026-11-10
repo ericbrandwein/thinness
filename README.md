@@ -18,7 +18,7 @@ pipenv run python -m minimal_graphs.generate 10
 pipenv run python -m minimal_graphs.compare
 ```
 
-The first command writes the lists to `data/generated/`, and the second one compares them with the ones in `data/`, up to isomorphism. As both parameters are hereditary, a graph is minimal if its value is larger than the values of the graphs obtained by removing one of its vertices, which are looked up in tables of the smaller orders. The graphs with 10 vertices take about 2 CPU hours. It needs nauty (`geng` and its library), which comes with SageMath.
+The first command writes the lists to `data/generated/`, and the second one compares them with the ones in `data/`, up to isomorphism. As both parameters are hereditary, a graph is minimal if its value is larger than the values of the graphs obtained by removing one of its vertices, which are looked up in tables of the smaller orders. The tables also keep an optimal order of each graph for the proper thinness, so the proper thinness of most graphs is found by inserting a vertex in the order of a graph without it. The graphs with 10 vertices take about 40 CPU minutes. It needs nauty (`geng` and its library), which comes with SageMath.
 
 Removing a vertex lowers the thinness by at most one, but it can lower the proper thinness by two: `I?BvUqw]?` and `IUZurzmmo` have proper thinness 5, and removing any of their vertices leaves a graph with proper thinness 3. They are the only such graphs with up to 10 vertices.
 
