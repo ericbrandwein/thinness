@@ -1,5 +1,5 @@
-from libc.string cimport memcmp, memcpy, memset
-from cysignals.memory cimport sig_calloc, sig_free
+from libc.string cimport memcmp, memcpy
+from cysignals.memory cimport sig_calloc, sig_free, sig_malloc, sig_realloc
 from sage.libs.gmp.types cimport mp_limb_t
 
 
@@ -13,9 +13,12 @@ cdef class SeenStates:
     A state is the number of parts used, the suffix and `sets_per_part` sets of
     vertices for each part, such as the suffix neighbors of the part, in an order
     that doesn't depend on the order of the parts. Each set of vertices takes
-    `words` 64-bit words, and the state is stored as a key of `key_words` words,
-    where the unused parts are zero. Each slot of the table is the hash of its key
-    followed by the key. Hashes are never 0, so that 0 marks an empty slot.
+    `words` 64-bit words, and the state is stored as a key with the number of
+    parts used, the suffix and the sets of those parts, so it takes up to
+    `key_words` words. The keys are stored one after the other in `keys`, and
+    each slot of the table is the hash of its key followed by where the key
+    starts in `keys`, so that the memory doesn't depend on the maximum number
+    of parts. Hashes are never 0, so that 0 marks an empty slot.
 
     Once it has `max_size` states, no more are added.
     """
@@ -31,14 +34,18 @@ cdef class SeenStates:
         self.max_size = max_size
         self.size = 0
         self.capacity = INITIAL_CAPACITY
-        self.slots = <uint64_t*>sig_calloc(self.capacity * (1 + self.key_words), sizeof(uint64_t))
+        self.slots = <uint64_t*>sig_calloc(2 * self.capacity, sizeof(uint64_t))
+        self.keys_used = 0
+        self.keys_capacity = INITIAL_CAPACITY * self.key_words
+        self.keys = <uint64_t*>sig_malloc(self.keys_capacity * sizeof(uint64_t))
         self.key = <uint64_t*>sig_calloc(self.key_words, sizeof(uint64_t))
         self.part_key = <uint64_t*>sig_calloc(words * sets_per_part, sizeof(uint64_t))
-        if self.slots == NULL or self.key == NULL or self.part_key == NULL:
+        if self.slots == NULL or self.keys == NULL or self.key == NULL or self.part_key == NULL:
             raise MemoryError
 
     def __dealloc__(self):
         sig_free(self.slots)
+        sig_free(self.keys)
         sig_free(self.key)
         sig_free(self.part_key)
 
@@ -84,7 +91,6 @@ cdef class SeenStates:
                 )
                 position -= 1
             memcpy(parts_key + position * part_words, self.part_key, part_bytes)
-        memset(parts_key + parts_used * part_words, 0, (self.max_parts - parts_used) * part_bytes)
 
         return self._contains_or_add_key()
 
@@ -118,67 +124,82 @@ cdef class SeenStates:
                 position -= 1
             for i in range(sets_per_part):
                 parts_key[position * sets_per_part + i] = sets[i]
-        for i in range(parts_used * sets_per_part, self.max_parts * sets_per_part):
-            parts_key[i] = 0
 
         return self._contains_or_add_key()
 
     cdef bint _contains_or_add_key(self) noexcept:
-        cdef uint64_t hash = _hash_words(self.key, self.key_words)
-        cdef uint64_t* slot = self._find_slot(self.slots, self.capacity, hash, self.key)
+        cdef size_t key_words = self._used_key_words(self.key)
+        cdef uint64_t hash = _hash_words(self.key, key_words)
+        cdef uint64_t* slot = self._find_slot(hash, self.key, key_words)
         if slot[0] != 0:
             return True
         if self.size >= self.max_size:
             return False
+        if self.keys_used + key_words > self.keys_capacity and not self._grow_keys():
+            return False
         if 2 * (self.size + 1) > self.capacity:
             if not self._grow():
                 return False
-            slot = self._find_slot(self.slots, self.capacity, hash, self.key)
+            slot = self._find_slot(hash, self.key, key_words)
         slot[0] = hash
-        memcpy(slot + 1, self.key, self.key_words * sizeof(uint64_t))
+        slot[1] = self.keys_used
+        memcpy(self.keys + self.keys_used, self.key, key_words * sizeof(uint64_t))
+        self.keys_used += key_words
         self.size += 1
         return False
 
-    cdef uint64_t* _find_slot(
-        self,
-        uint64_t* slots,
-        size_t capacity,
-        uint64_t hash,
-        uint64_t* key,
-    ) noexcept:
-        """The slot that holds `key`, or the empty slot where it goes."""
-        cdef size_t slot_words = 1 + self.key_words
-        cdef size_t i = hash & (capacity - 1)
+    cdef uint64_t* _find_slot(self, uint64_t hash, uint64_t* key, size_t key_words) noexcept:
+        """The slot that holds `key`, of `key_words` words, or the empty slot where it goes."""
+        cdef size_t i = hash & (self.capacity - 1)
         cdef uint64_t* slot
+        cdef uint64_t* stored_key
         while True:
-            slot = slots + i * slot_words
-            if slot[0] == 0 or (
-                slot[0] == hash
-                and memcmp(slot + 1, key, self.key_words * sizeof(uint64_t)) == 0
-            ):
+            slot = self.slots + 2 * i
+            if slot[0] == 0:
                 return slot
-            i = (i + 1) & (capacity - 1)
+            if slot[0] == hash:
+                stored_key = self.keys + slot[1]
+                # Keys with different numbers of parts have different lengths, so
+                # their first words are compared before the rest.
+                if stored_key[0] == key[0] and memcmp(stored_key, key, key_words * sizeof(uint64_t)) == 0:
+                    return slot
+            i = (i + 1) & (self.capacity - 1)
+
+    cdef size_t _used_key_words(self, uint64_t* key) noexcept:
+        """The words of `key` that hold the number of parts used, the suffix and the sets of those parts."""
+        return 1 + self.words * (1 + self.sets_per_part * key[0])
 
     cdef bint _grow(self) noexcept:
         """Double the capacity. Returns False if there is no memory for it."""
-        cdef size_t slot_words = 1 + self.key_words
         cdef size_t new_capacity = 2 * self.capacity
-        cdef uint64_t* new_slots = <uint64_t*>sig_calloc(new_capacity * slot_words, sizeof(uint64_t))
+        cdef uint64_t* new_slots = <uint64_t*>sig_calloc(2 * new_capacity, sizeof(uint64_t))
         if new_slots == NULL:
             return False
         cdef size_t i
+        cdef size_t j
         cdef uint64_t* slot
         for i in range(self.capacity):
-            slot = self.slots + i * slot_words
+            slot = self.slots + 2 * i
             if slot[0] != 0:
-                memcpy(
-                    self._find_slot(new_slots, new_capacity, slot[0], slot + 1),
-                    slot,
-                    slot_words * sizeof(uint64_t),
-                )
+                # The keys are all different, so each one goes to the first empty slot.
+                j = slot[0] & (new_capacity - 1)
+                while new_slots[2 * j] != 0:
+                    j = (j + 1) & (new_capacity - 1)
+                new_slots[2 * j] = slot[0]
+                new_slots[2 * j + 1] = slot[1]
         sig_free(self.slots)
         self.slots = new_slots
         self.capacity = new_capacity
+        return True
+
+    cdef bint _grow_keys(self) noexcept:
+        """Double the space for keys. Returns False if there is no memory for it."""
+        cdef size_t new_capacity = 2 * self.keys_capacity
+        cdef uint64_t* new_keys = <uint64_t*>sig_realloc(self.keys, new_capacity * sizeof(uint64_t))
+        if new_keys == NULL:
+            return False
+        self.keys = new_keys
+        self.keys_capacity = new_capacity
         return True
 
 

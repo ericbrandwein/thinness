@@ -13,6 +13,9 @@ cdef class SeenStates:
     cdef size_t size
     cdef size_t capacity
     cdef uint64_t* slots
+    cdef uint64_t* keys
+    cdef size_t keys_used
+    cdef size_t keys_capacity
     cdef uint64_t* key
     cdef uint64_t* part_key
 
@@ -29,11 +32,7 @@ cdef class SeenStates:
         int parts_used,
     ) noexcept
     cdef bint _contains_or_add_key(self) noexcept
-    cdef uint64_t* _find_slot(
-        self,
-        uint64_t* slots,
-        size_t capacity,
-        uint64_t hash,
-        uint64_t* key,
-    ) noexcept
+    cdef uint64_t* _find_slot(self, uint64_t hash, uint64_t* key, size_t key_words) noexcept
+    cdef size_t _used_key_words(self, uint64_t* key) noexcept
     cdef bint _grow(self) noexcept
+    cdef bint _grow_keys(self) noexcept
