@@ -9,9 +9,21 @@ from sage.graphs.graph import Graph
 from cysignals.memory cimport sig_malloc, sig_calloc, sig_free
 from cysignals.signals cimport sig_on, sig_off
 
+from thinness.optimizations import ALL_OPTIMIZATIONS, Optimization
 from thinness.seen_states cimport SeenStates
 
 MAX_VERTICES = 64
+
+cdef int _ALL_OPTIMIZATIONS = ALL_OPTIMIZATIONS
+cdef int _SYMMETRY = Optimization.SYMMETRY
+cdef int _SEEN_STATES = Optimization.SEEN_STATES
+cdef int _GREEDY_EXISTING_PART = Optimization.GREEDY_EXISTING_PART
+cdef int _GREEDY_NEW_PART = Optimization.GREEDY_NEW_PART
+cdef int _PART_DOMINANCE = Optimization.PART_DOMINANCE
+cdef int _VERTEX_DOMINANCE = Optimization.VERTEX_DOMINANCE
+cdef int _NEW_PART_ONLY_IF_NEEDED = Optimization.NEW_PART_ONLY_IF_NEEDED
+cdef int _NEW_PART_DOMINANCE = Optimization.NEW_PART_DOMINANCE
+cdef int _UNLOCKING = Optimization.UNLOCKING
 
 
 cdef extern from *:
@@ -25,20 +37,25 @@ def search(
     int upper_bound,
     int max_prefix_length,
     int max_seen_entries,
-) -> tuple[int, list[int], list[int]]:
+    int optimizations=ALL_OPTIMIZATIONS,
+) -> tuple[int, list[int], list[int], int]:
     """Search for a solution with at most `upper_bound` parts, stopping at one with at most `lower_bound`.
 
     The vertices of `graph` must be 0, ..., n-1, with n at most 64. Returns the
-    number of parts of the best solution found, or -1 if none was found, and the
-    order and the part of each vertex of that solution.
+    number of parts of the best solution found, or -1 if none was found, the
+    order and the part of each vertex of that solution, and the number of nodes
+    searched. `optimizations` is a combination of `Optimization` flags.
     """
-    cdef _Context ctx = _Context(graph.order(), upper_bound, max_prefix_length, max_seen_entries)
+    cdef _Context ctx = _Context(graph.order(), upper_bound, max_prefix_length, max_seen_entries, optimizations)
     for u, v in graph.edge_iterator(labels=False):
         ctx.graph[u] |= _bit(v)
         ctx.graph[v] |= _bit(u)
     cdef list orbit
-    for orbit in graph.automorphism_group(orbits=True, return_group=False):
-        ctx.canonical_vertices |= _bit(orbit[0])
+    if optimizations & _SYMMETRY:
+        for orbit in graph.automorphism_group(orbits=True, return_group=False):
+            ctx.canonical_vertices |= _bit(orbit[0])
+    else:
+        ctx.canonical_vertices = _lower_bits(ctx.n)
 
     cdef int solution = _search(ctx, lower_bound, upper_bound)
 
@@ -46,6 +63,7 @@ def search(
         solution,
         [ctx.best_order[i] for i in range(ctx.n)],
         [ctx.best_partition[i] for i in range(ctx.n)],
+        ctx.nodes,
     )
 
 
@@ -61,8 +79,9 @@ cdef int search_words(
     """Same as `search`, for a graph given by the neighbors of each vertex, without the solution.
 
     `canonical_vertices` has one vertex of each orbit of the automorphism group.
+    Every optimization is enabled.
     """
-    cdef _Context ctx = _Context(n, upper_bound, max_prefix_length, max_seen_entries)
+    cdef _Context ctx = _Context(n, upper_bound, max_prefix_length, max_seen_entries, _ALL_OPTIMIZATIONS)
     memcpy(ctx.graph, graph, n * sizeof(uint64_t))
     ctx.canonical_vertices = canonical_vertices
     return _search(ctx, lower_bound, upper_bound)
@@ -86,8 +105,8 @@ cdef class _Context:
     """State shared by every call of the branch and bound recursion.
 
     The arrays with one row per prefix length (`*_suffix_neighbors`,
-    `parts_for_vertices` and `vertices_not_added`) let each node of the search
-    keep its own rows while its children run.
+    `parts_for_vertices`, `vertices_not_added` and `other_new_part_candidates`)
+    let each node of the search keep its own rows while its children run.
     """
     cdef int n
     cdef uint64_t* graph
@@ -99,12 +118,15 @@ cdef class _Context:
     cdef uint64_t* part_suffix_neighbors
     cdef uint64_t* parts_for_vertices
     cdef uint64_t* vertices_not_added
+    cdef uint64_t* other_new_part_candidates
     cdef uint64_t* unlockers
     cdef uint64_t canonical_vertices
     cdef SeenStates seen_states
     cdef int* best_order
     cdef int* best_partition
     cdef int max_prefix_length
+    cdef int optimizations
+    cdef long long nodes
 
     def __cinit__(
         self,
@@ -112,6 +134,7 @@ cdef class _Context:
         int max_parts,
         int max_prefix_length,
         int max_seen_entries,
+        int optimizations,
     ):
         """The graph and the canonical vertices are filled in afterwards."""
         if n > MAX_VERTICES or max_parts > MAX_VERTICES:
@@ -129,6 +152,7 @@ cdef class _Context:
         self.part_suffix_neighbors = <uint64_t*>sig_calloc((n + 1) * max_parts + 1, sizeof(uint64_t))
         self.parts_for_vertices = <uint64_t*>sig_calloc(n * n, sizeof(uint64_t))
         self.vertices_not_added = <uint64_t*>sig_calloc(n, sizeof(uint64_t))
+        self.other_new_part_candidates = <uint64_t*>sig_calloc(n, sizeof(uint64_t))
         self.unlockers = <uint64_t*>sig_calloc(n, sizeof(uint64_t))
         self.best_order = <int*>sig_calloc(n, sizeof(int))
         self.best_partition = <int*>sig_calloc(n, sizeof(int))
@@ -136,7 +160,8 @@ cdef class _Context:
             self.graph == NULL or self.prefix == NULL or self.part_of == NULL
             or self.part_neighbors == NULL or self.vertex_suffix_neighbors == NULL
             or self.part_suffix_neighbors == NULL or self.parts_for_vertices == NULL
-            or self.vertices_not_added == NULL or self.unlockers == NULL
+            or self.vertices_not_added == NULL or self.other_new_part_candidates == NULL
+            or self.unlockers == NULL
             or self.best_order == NULL or self.best_partition == NULL
         ):
             raise MemoryError
@@ -144,6 +169,8 @@ cdef class _Context:
         self.seen_states = SeenStates(1, max_parts, max_seen_entries)
         self.canonical_vertices = 0
         self.max_prefix_length = max_prefix_length
+        self.optimizations = optimizations
+        self.nodes = 0
 
     def __dealloc__(self):
         sig_free(self.graph)
@@ -154,6 +181,7 @@ cdef class _Context:
         sig_free(self.part_suffix_neighbors)
         sig_free(self.parts_for_vertices)
         sig_free(self.vertices_not_added)
+        sig_free(self.other_new_part_candidates)
         sig_free(self.unlockers)
         sig_free(self.best_order)
         sig_free(self.best_partition)
@@ -201,6 +229,7 @@ cdef int _branch_and_bound(
     number of parts of the best solution found, which is stored in
     `ctx.best_order` and `ctx.best_partition`, or -1 if none was found.
     """
+    ctx.nodes += 1
     cdef int entry_level = level
     level = _increment_prefix_greedily_on_existing_parts(ctx, &suffix_vertices, level, parts_used)
 
@@ -241,7 +270,11 @@ cdef int _branch_and_bound(
         part = parts_used - 1
         lower_bound = max(lower_bound, parts_used)
 
-        vertex = _find_vertex_without_suffix_neighbors(ctx, suffix_vertices, level)
+        vertex = (
+            _find_vertex_without_suffix_neighbors(ctx, suffix_vertices, level)
+            if ctx.optimizations & _GREEDY_NEW_PART
+            else -1
+        )
         if vertex != -1:
             # The new part is empty, so it can take such a vertex greedily.
             ctx.prefix[level] = vertex
@@ -345,11 +378,18 @@ cdef inline int _branch_adding_to_existing_part(
         if parts_for_vertices[vertex] == 0:
             vertices_not_added |= _bit(vertex)
 
-    ctx.vertices_not_added[level] = _ignore_unlocked_vertices(
-        ctx,
-        level,
-        suffix_vertices,
-        vertices_not_added,
+    cdef uint64_t ignored_vertices = (
+        _ignore_unlocked_vertices(ctx, level, suffix_vertices)
+        if ctx.optimizations & _UNLOCKING
+        else 0
+    )
+    ctx.vertices_not_added[level] = vertices_not_added & ~ignored_vertices
+    # Without NEW_PART_ONLY_IF_NEEDED, the vertices that can be added to an existing
+    # part also start a new one. They are kept apart, as NEW_PART_DOMINANCE only
+    # compares the ones that can't.
+    ctx.other_new_part_candidates[level] = (
+        0 if ctx.optimizations & _NEW_PART_ONLY_IF_NEEDED
+        else suffix_vertices & ~vertices_not_added & ~ignored_vertices
     )
 
     vertex = _next(suffix_vertices, 0)
@@ -358,13 +398,13 @@ cdef inline int _branch_adding_to_existing_part(
 
         part = _next(parts_for_vertices[vertex], 0)
         while part != -1:
-            if not _can_other_vertex_be_prepended_freely(
+            if not (ctx.optimizations & _VERTEX_DOMINANCE and _can_other_vertex_be_prepended_freely(
                 ctx,
                 vertex,
                 part,
                 level,
                 other_vertices,
-            ) and _update_best_solution(
+            )) and _update_best_solution(
                 _branch_with_vertex_on_part(
                     ctx,
                     vertex,
@@ -413,6 +453,9 @@ cdef inline uint64_t _get_available_parts_for_vertex(
             if __builtin_popcountll(neighbors_of_part) == suffix_degree - 1:
                 ctx.unlockers[__builtin_ctzll(vertex_neighbors & ~neighbors_of_part)] |= _bit(vertex)
 
+    if not ctx.optimizations & _PART_DOMINANCE:
+        return parts_for_vertex
+
     for part in range(parts_used):
         if parts_for_vertex & _bit(part):
             for other_part in range(part):
@@ -455,9 +498,8 @@ cdef inline uint64_t _ignore_unlocked_vertices(
     _Context ctx,
     int level,
     uint64_t suffix_vertices,
-    uint64_t vertices_not_added,
 ) noexcept:
-    """Remove from this level's candidates the vertices that some other vertex unlocks.
+    """Ignore at this level the vertices that some other vertex unlocks.
 
     A vertex `u` unlocks `v` if `u` can be added to some part so that the part's
     suffix neighbors only gain `v`. In that case putting `u` and then `v` is
@@ -465,8 +507,7 @@ cdef inline uint64_t _ignore_unlocked_vertices(
     an existing part nor on a new one.
 
     Vertices already ignored don't unlock others, so that two vertices can't
-    cause each other to be ignored. Returns `vertices_not_added` without the
-    ignored vertices.
+    cause each other to be ignored. Returns the ignored vertices.
     """
     cdef uint64_t* parts_for_vertices = ctx.parts_for_vertices + level * ctx.n
     cdef uint64_t ignored_vertices = 0
@@ -478,7 +519,7 @@ cdef inline uint64_t _ignore_unlocked_vertices(
         if ctx.unlockers[vertex] & ~ignored_vertices:
             ignored_vertices |= _bit(vertex)
             parts_for_vertices[vertex] = 0
-    return vertices_not_added & ~ignored_vertices
+    return ignored_vertices
 
 
 cdef inline int _branch_adding_to_new_part(
@@ -493,15 +534,15 @@ cdef inline int _branch_adding_to_new_part(
     cdef int part = parts_used - 1
     # Vertices discarded by _can_other_vertex_open_new_part_freely are removed from here.
     cdef uint64_t candidates = ctx.vertices_not_added[level]
+    cdef uint64_t other_candidates = ctx.other_new_part_candidates[level]
     if level == 0:
         candidates = ctx.canonical_vertices
-    cdef int vertex = _next(candidates, 0)
+    cdef int vertex = _next(candidates | other_candidates, 0)
     while vertex != -1:
-        if not _can_other_vertex_open_new_part_freely(
-            ctx,
-            vertex,
-            level,
-            &candidates,
+        if not (
+            candidates & _bit(vertex)
+            and ctx.optimizations & _NEW_PART_DOMINANCE
+            and _can_other_vertex_open_new_part_freely(ctx, vertex, level, &candidates)
         ) and _update_best_solution(
             _branch_with_vertex_on_part(
                 ctx,
@@ -519,7 +560,7 @@ cdef inline int _branch_adding_to_new_part(
         ):
             return best_solution_found
 
-        vertex = _next(candidates, vertex + 1)
+        vertex = _next(candidates | other_candidates, vertex + 1)
 
     return best_solution_found
 
@@ -590,6 +631,8 @@ cdef inline int _increment_prefix_greedily_on_existing_parts(
     vertices leave the suffix. Returns the new length of the prefix.
     """
     _compute_suffix_neighbors(ctx, suffix_vertices[0], level, parts_used)
+    if not ctx.optimizations & _GREEDY_EXISTING_PART:
+        return level
     cdef uint64_t* vertex_neighbors = ctx.vertex_suffix_neighbors + level * ctx.n
     cdef uint64_t* part_neighbors = ctx.part_suffix_neighbors + level * ctx.max_parts
     cdef int new_level = level
@@ -666,7 +709,7 @@ cdef inline bint _check_state_seen(
     Parts are compared by their suffix neighbors, which are all that matters for
     the rest of the search, and regardless of their order.
     """
-    if level > ctx.max_prefix_length:
+    if level > ctx.max_prefix_length or not ctx.optimizations & _SEEN_STATES:
         return False
     return ctx.seen_states.contains_or_add_words(
         suffix_vertices,

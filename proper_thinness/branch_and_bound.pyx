@@ -11,11 +11,18 @@ from thinness.consistent_solution import ConsistentSolution
 from thinness.seen_states cimport SeenStates
 from proper_thinness import branch_and_bound_64
 from proper_thinness.heuristic import heuristic_solution
+from proper_thinness.optimizations import ALL_OPTIMIZATIONS, Optimization
 
 DEFAULT_MAX_PREFIX_LENGTH = 15
 DEFAULT_MAX_SEEN_ENTRIES = 1_000_000
 # Graphs with at most this many vertices are searched with 64-bit words instead of bitsets.
 MAX_VERTICES_FOR_WORDS = branch_and_bound_64.MAX_VERTICES
+
+cdef int _SYMMETRY = Optimization.SYMMETRY
+cdef int _SEEN_STATES = Optimization.SEEN_STATES
+cdef int _GREEDY_EXISTING_PART = Optimization.GREEDY_EXISTING_PART
+cdef int _GREEDY_NEW_PART = Optimization.GREEDY_NEW_PART
+cdef int _PART_DOMINANCE = Optimization.PART_DOMINANCE
 
 
 def calculate_proper_thinness(
@@ -25,9 +32,22 @@ def calculate_proper_thinness(
     certificate: bool = False,
     max_prefix_length: int = DEFAULT_MAX_PREFIX_LENGTH,
     max_seen_entries: int = DEFAULT_MAX_SEEN_ENTRIES,
-    use_thinness_lower_bound: bool = True,
+    optimizations: Optimization = ALL_OPTIMIZATIONS,
+    statistics: dict | None = None,
 ) -> ConsistentSolution | int:
-    components = [graph.subgraph(component, immutable=False) for component in graph.connected_components(sort=False)]
+    """`optimizations` is the combination of `Optimization` flags to use, all of them by default.
+
+    If `statistics` is given, its `'nodes'` is set to the number of nodes the
+    branch and bound searched, and its `'thinness_nodes'` to those searched to
+    compute the thinness, with `Optimization.THINNESS_LOWER_BOUND`.
+    """
+    if statistics is not None:
+        statistics['nodes'] = 0
+        statistics['thinness_nodes'] = 0
+    if optimizations & Optimization.COMPONENTS:
+        components = [graph.subgraph(component, immutable=False) for component in graph.connected_components(sort=False)]
+    else:
+        components = [graph.copy(immutable=False)]
     relabellings = [component.relabel(return_map=True) for component in components]
     solutions = [
         calculate_proper_thinness_of_connected_graph(
@@ -37,7 +57,8 @@ def calculate_proper_thinness(
             certificate,
             max_prefix_length,
             max_seen_entries,
-            use_thinness_lower_bound,
+            optimizations,
+            statistics,
         ) for component in components
     ]
 
@@ -84,21 +105,33 @@ def calculate_proper_thinness_of_connected_graph(
     certificate: bool = False,
     max_prefix_length: int = DEFAULT_MAX_PREFIX_LENGTH,
     max_seen_entries: int = DEFAULT_MAX_SEEN_ENTRIES,
-    use_thinness_lower_bound: bool = True,
+    optimizations: Optimization = ALL_OPTIMIZATIONS,
+    statistics: dict | None = None,
 ) -> ConsistentSolution | int:
     """upper_bound is exclusive.
 
-    The proper thinness is at least the thinness, which is used as lower bound if
-    `use_thinness_lower_bound`. A solution found heuristically gives an upper
-    bound, and is returned if the search doesn't find a better one. The order of
-    the thinness solution is one of the orders the heuristic tries.
+    The proper thinness is at least the thinness, which is used as lower bound
+    with `Optimization.THINNESS_LOWER_BOUND`. With `Optimization.HEURISTIC_UPPER_BOUND`,
+    a solution found heuristically gives an upper bound, and is returned if the
+    search doesn't find a better one. The order of the thinness solution is one
+    of the orders the heuristic tries. Without `Optimization.COMPONENTS`, the
+    graph doesn't need to be connected. If `statistics` is given, the nodes
+    searched are added to its `'nodes'`, and those searched to compute the
+    thinness to its `'thinness_nodes'`.
     """
     extra_orders = []
-    if use_thinness_lower_bound:
-        thinness_solution = calculate_thinness(graph, certificate=True)
+    if optimizations & Optimization.THINNESS_LOWER_BOUND:
+        thinness_statistics = {}
+        thinness_solution = calculate_thinness(graph, certificate=True, statistics=thinness_statistics)
+        if statistics is not None:
+            statistics['thinness_nodes'] = statistics.get('thinness_nodes', 0) + thinness_statistics['nodes']
         lower_bound = max(lower_bound, thinness_solution.thinness)
         extra_orders.append(thinness_solution.order)
-    heuristic = heuristic_solution(graph, extra_orders)
+    if optimizations & Optimization.HEURISTIC_UPPER_BOUND:
+        heuristic = heuristic_solution(graph, extra_orders)
+    else:
+        # Every vertex on its own part is a solution.
+        heuristic = ConsistentSolution(list(graph), [{vertex} for vertex in graph])
     if heuristic.thinness <= lower_bound:
         return heuristic if certificate else heuristic.thinness
     upper_bound = heuristic.thinness if upper_bound is None else min(upper_bound, heuristic.thinness)
@@ -108,13 +141,16 @@ def calculate_proper_thinness_of_connected_graph(
         if graph.order() <= MAX_VERTICES_FOR_WORDS
         else _search_with_bitsets
     )
-    branch_and_bound_proper_thinness, best_order, best_partition = search(
+    branch_and_bound_proper_thinness, best_order, best_partition, nodes = search(
         graph,
         lower_bound,
         upper_bound - 1,
         max_prefix_length,
         max_seen_entries,
+        optimizations,
     )
+    if statistics is not None:
+        statistics['nodes'] = statistics.get('nodes', 0) + nodes
 
     cdef int proper_thinness = branch_and_bound_proper_thinness if branch_and_bound_proper_thinness != -1 else upper_bound
     cdef list partition
@@ -135,9 +171,10 @@ def _search_with_bitsets(
     int upper_bound,
     int max_prefix_length,
     int max_seen_entries,
-) -> tuple[int, list[int], list[int]]:
+    int optimizations=ALL_OPTIMIZATIONS,
+) -> tuple[int, list[int], list[int], int]:
     """Same as `branch_and_bound_64.search`, for graphs of any size."""
-    cdef _Context ctx = _Context(graph, upper_bound, max_prefix_length, max_seen_entries)
+    cdef _Context ctx = _Context(graph, upper_bound, max_prefix_length, max_seen_entries, optimizations)
 
     sig_on()
     cdef int solution = _branch_and_bound(
@@ -153,6 +190,7 @@ def _search_with_bitsets(
         solution,
         [ctx.best_order[i] for i in range(ctx.n)],
         [ctx.best_partition[i] for i in range(ctx.n)],
+        ctx.nodes,
     )
 
 
@@ -191,6 +229,8 @@ cdef class _Context:
     cdef int* best_partition
     cdef int max_prefix_length
     cdef int max_seen_entries
+    cdef int optimizations
+    cdef long long nodes
 
     def __cinit__(
         self,
@@ -198,6 +238,7 @@ cdef class _Context:
         int max_parts,
         int max_prefix_length,
         int max_seen_entries,
+        int optimizations,
     ):
         dense_graph_init(self.graph, graph)
 
@@ -237,13 +278,18 @@ cdef class _Context:
         self.seen_states = SeenStates(self.all_vertices.limbs, max_parts, max_seen_entries, sets_per_part=2)
 
         bitset_init(self.canonical_vertices, n)
-        _build_canonical_vertices(graph, self.canonical_vertices)
+        if optimizations & _SYMMETRY:
+            _build_canonical_vertices(graph, self.canonical_vertices)
+        else:
+            bitset_copy(self.canonical_vertices, self.all_vertices)
 
         self.best_order = <int*>sig_malloc(sizeof(int) * n)
         self.best_partition = <int*>sig_malloc(sizeof(int) * n)
 
         self.max_prefix_length = max_prefix_length
         self.max_seen_entries = max_seen_entries
+        self.optimizations = optimizations
+        self.nodes = 0
 
     def __dealloc__(self):
         cdef int i
@@ -294,6 +340,7 @@ cdef int _branch_and_bound(
     int upper_bound,
 ):
     """upper_bound is inclusive"""
+    ctx.nodes += 1
     cdef int level = _get_level(suffix_vertices)
 
     cdef bitset_t new_suffix = ctx.new_suffixes.rows[level]
@@ -343,7 +390,9 @@ cdef int _branch_and_bound(
         part = parts_used - 1
         lower_bound = max(lower_bound, parts_used)
 
-        if _add_vertex_to_prefix_greedily_on_part(ctx, part, new_suffix, level, entry_level):
+        if ctx.optimizations & _GREEDY_NEW_PART and _add_vertex_to_prefix_greedily_on_part(
+            ctx, part, new_suffix, level, entry_level,
+        ):
             new_part_solution = _branch_and_bound(
                 ctx,
                 new_suffix,
@@ -454,6 +503,8 @@ cdef inline bitset_s* _get_available_parts_for_vertex(
         if _is_subset_ignoring(part_neighbors[part], vertex_neighbors, vertex):
             bitset_add(parts_for_vertex, part)
     bitset_difference(parts_for_vertex, parts_for_vertex, ctx.forbidden_parts_for_vertices.rows[vertex])
+    if not ctx.optimizations & _PART_DOMINANCE:
+        return parts_for_vertex
 
     cdef bint newly_forbidden_vertices_computed = False
     part = bitset_next(parts_for_vertex, 0)
@@ -617,6 +668,8 @@ cdef inline int _increment_prefix_greedily_on_existing_parts(
     the prefix.
     """
     _compute_suffix_neighbors(ctx, suffix_vertices, level, parts_used)
+    if not ctx.optimizations & _GREEDY_EXISTING_PART:
+        return level
     cdef bitset_t* vertex_neighbors = ctx.vertex_suffix_neighbors_by_level[level].rows
     cdef bitset_t* part_neighbors = ctx.part_suffix_neighbors_by_level[level].rows
     cdef int new_level = level
@@ -804,7 +857,7 @@ cdef inline bint _check_state_seen(
     neighbors and the suffix vertices that can't be added to it. Parts are
     compared by those, regardless of their order.
     """
-    if level > ctx.max_prefix_length:
+    if level > ctx.max_prefix_length or not ctx.optimizations & _SEEN_STATES:
         return False
     _build_part_states(ctx, suffix_vertices, parts_used)
     return ctx.seen_states.contains_or_add(suffix_vertices, ctx.part_states.rows, parts_used)

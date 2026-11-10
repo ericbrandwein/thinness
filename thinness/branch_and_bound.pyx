@@ -9,6 +9,7 @@ from sage.graphs.graph_decompositions.vertex_separation import vertex_separation
 
 from thinness import branch_and_bound_64
 from thinness.consistent_solution import ConsistentSolution
+from thinness.optimizations import ALL_OPTIMIZATIONS, Optimization
 from thinness.seen_states cimport SeenStates
 from thinness.vertex_separation import solution_from_vertex_separation
 
@@ -16,6 +17,16 @@ DEFAULT_MAX_PREFIX_LENGTH = 15
 DEFAULT_MAX_SEEN_ENTRIES = 1_000_000
 # Graphs with at most this many vertices are searched with 64-bit words instead of bitsets.
 MAX_VERTICES_FOR_WORDS = branch_and_bound_64.MAX_VERTICES
+
+cdef int _SYMMETRY = Optimization.SYMMETRY
+cdef int _SEEN_STATES = Optimization.SEEN_STATES
+cdef int _GREEDY_EXISTING_PART = Optimization.GREEDY_EXISTING_PART
+cdef int _GREEDY_NEW_PART = Optimization.GREEDY_NEW_PART
+cdef int _PART_DOMINANCE = Optimization.PART_DOMINANCE
+cdef int _VERTEX_DOMINANCE = Optimization.VERTEX_DOMINANCE
+cdef int _NEW_PART_ONLY_IF_NEEDED = Optimization.NEW_PART_ONLY_IF_NEEDED
+cdef int _NEW_PART_DOMINANCE = Optimization.NEW_PART_DOMINANCE
+cdef int _UNLOCKING = Optimization.UNLOCKING
 
 
 def calculate_thinness(
@@ -25,12 +36,24 @@ def calculate_thinness(
     certificate: bool = False,
     max_prefix_length: int = DEFAULT_MAX_PREFIX_LENGTH,
     max_seen_entries: int = DEFAULT_MAX_SEEN_ENTRIES,
+    optimizations: Optimization = ALL_OPTIMIZATIONS,
+    statistics: dict | None = None,
 ) -> ConsistentSolution | int:
-    # Largest first, as they are the most likely to have the largest thinness.
-    components = [
-        graph.subgraph(component, immutable=False)
-        for component in sorted(graph.connected_components(sort=False), key=len, reverse=True)
-    ]
+    """`optimizations` is the combination of `Optimization` flags to use, all of them by default.
+
+    If `statistics` is given, its `'nodes'` is set to the number of nodes the
+    branch and bound searched.
+    """
+    if statistics is not None:
+        statistics['nodes'] = 0
+    if optimizations & Optimization.COMPONENTS:
+        # Largest first, as they are the most likely to have the largest thinness.
+        components = [
+            graph.subgraph(component, immutable=False)
+            for component in sorted(graph.connected_components(sort=False), key=len, reverse=True)
+        ]
+    else:
+        components = [graph.copy(immutable=False)]
     relabellings = [component.relabel(return_map=True) for component in components]
     solutions = []
     for component in components:
@@ -41,6 +64,8 @@ def calculate_thinness(
             certificate,
             max_prefix_length,
             max_seen_entries,
+            optimizations,
+            statistics,
         )
         solutions.append(solution)
         # The thinness of the graph is the maximum over its components, so the
@@ -89,19 +114,30 @@ def calculate_thinness_of_connected_graph(
     certificate: bool = False,
     max_prefix_length: int = DEFAULT_MAX_PREFIX_LENGTH,
     max_seen_entries: int = DEFAULT_MAX_SEEN_ENTRIES,
+    optimizations: Optimization = ALL_OPTIMIZATIONS,
+    statistics: dict | None = None,
 ) -> ConsistentSolution | int:
-    """upper_bound is exclusive."""
-    vertex_separation_value, vertex_separation_order = vertex_separation(graph)
-    upper_bound_from_vertex_separation = max(vertex_separation_value, 1)
-    if upper_bound_from_vertex_separation <= lower_bound:
+    """upper_bound is exclusive.
+
+    Without `Optimization.COMPONENTS`, the graph doesn't need to be connected. If
+    `statistics` is given, the nodes searched are added to its `'nodes'`.
+    """
+    if optimizations & Optimization.VERTEX_SEPARATION_BOUND:
+        vertex_separation_value, vertex_separation_order = vertex_separation(graph)
+        initial_upper_bound = max(vertex_separation_value, 1)
+    else:
+        # Every vertex on its own part is a solution.
+        initial_upper_bound = max(graph.order(), 1)
+        vertex_separation_order = None
+    if initial_upper_bound <= lower_bound:
         if certificate:
-            return solution_from_vertex_separation(graph, vertex_separation_order)
+            return _fallback_solution(graph, vertex_separation_order)
         else:
-            return upper_bound_from_vertex_separation
+            return initial_upper_bound
     upper_bound = (
-        upper_bound_from_vertex_separation
+        initial_upper_bound
         if upper_bound is None
-        else min(upper_bound, upper_bound_from_vertex_separation)
+        else min(upper_bound, initial_upper_bound)
     )
 
     search = (
@@ -109,19 +145,22 @@ def calculate_thinness_of_connected_graph(
         if graph.order() <= MAX_VERTICES_FOR_WORDS
         else _search_with_bitsets
     )
-    branch_and_bound_thinness, best_order, best_partition = search(
+    branch_and_bound_thinness, best_order, best_partition, nodes = search(
         graph,
         lower_bound,
         upper_bound - 1,
         max_prefix_length,
         max_seen_entries,
+        optimizations,
     )
+    if statistics is not None:
+        statistics['nodes'] = statistics.get('nodes', 0) + nodes
 
     cdef int thinness = branch_and_bound_thinness if branch_and_bound_thinness != -1 else upper_bound
     cdef list partition
     if certificate:
         if branch_and_bound_thinness == -1:
-            return solution_from_vertex_separation(graph, vertex_separation_order)
+            return _fallback_solution(graph, vertex_separation_order)
         partition = [set() for _ in range(thinness)]
         for vertex, part in enumerate(best_partition):
             partition[part].add(vertex)
@@ -130,15 +169,23 @@ def calculate_thinness_of_connected_graph(
         return thinness
 
 
+def _fallback_solution(graph: Graph, vertex_separation_order: list | None) -> ConsistentSolution:
+    """The solution given by the vertex separation, or, without it, the one with every vertex on its own part."""
+    if vertex_separation_order is None:
+        return ConsistentSolution(list(graph), [{vertex} for vertex in graph])
+    return solution_from_vertex_separation(graph, vertex_separation_order)
+
+
 def _search_with_bitsets(
     graph: Graph,
     int lower_bound,
     int upper_bound,
     int max_prefix_length,
     int max_seen_entries,
-) -> tuple[int, list[int], list[int]]:
+    int optimizations=ALL_OPTIMIZATIONS,
+) -> tuple[int, list[int], list[int], int]:
     """Same as `branch_and_bound_64.search`, for graphs of any size."""
-    cdef _Context ctx = _Context(graph, upper_bound, max_prefix_length, max_seen_entries)
+    cdef _Context ctx = _Context(graph, upper_bound, max_prefix_length, max_seen_entries, optimizations)
 
     sig_on()
     cdef int solution = _branch_and_bound(
@@ -155,6 +202,7 @@ def _search_with_bitsets(
         solution,
         [ctx.best_order[i] for i in range(ctx.n)],
         [ctx.best_partition[i] for i in range(ctx.n)],
+        ctx.nodes,
     )
 
 
@@ -180,6 +228,7 @@ cdef class _Context:
     cdef binary_matrix_t* parts_for_vertices
     cdef bitset_t unlocked_vertices
     cdef binary_matrix_t vertices_not_added
+    cdef binary_matrix_t other_new_part_candidates
     cdef binary_matrix_t unlockers
     cdef bitset_t ignored_vertices
     cdef SeenStates seen_states
@@ -188,6 +237,8 @@ cdef class _Context:
     cdef int* best_partition
     cdef int max_prefix_length
     cdef int max_seen_entries
+    cdef int optimizations
+    cdef long long nodes
 
     def __cinit__(
         self,
@@ -195,6 +246,7 @@ cdef class _Context:
         int max_parts,
         int max_prefix_length,
         int max_seen_entries,
+        int optimizations,
     ):
         dense_graph_init(self.graph, graph)
 
@@ -222,19 +274,25 @@ cdef class _Context:
 
         bitset_init(self.unlocked_vertices, n)
         binary_matrix_init(self.vertices_not_added, n, n)
+        binary_matrix_init(self.other_new_part_candidates, n, n)
         binary_matrix_init(self.unlockers, n, n)
         bitset_init(self.ignored_vertices, n)
 
         self.seen_states = SeenStates(self.all_vertices.limbs, max_parts, max_seen_entries)
 
         bitset_init(self.canonical_vertices, n)
-        _build_canonical_vertices(graph, self.canonical_vertices)
+        if optimizations & _SYMMETRY:
+            _build_canonical_vertices(graph, self.canonical_vertices)
+        else:
+            bitset_copy(self.canonical_vertices, self.all_vertices)
 
         self.best_order = <int*>sig_malloc(sizeof(int) * n)
         self.best_partition = <int*>sig_malloc(sizeof(int) * n)
 
         self.max_prefix_length = max_prefix_length
         self.max_seen_entries = max_seen_entries
+        self.optimizations = optimizations
+        self.nodes = 0
 
     def __dealloc__(self):
         binary_matrix_free(self.graph)
@@ -249,6 +307,7 @@ cdef class _Context:
         _free_matrices(self.parts_for_vertices, self.n)
         bitset_free(self.unlocked_vertices)
         binary_matrix_free(self.vertices_not_added)
+        binary_matrix_free(self.other_new_part_candidates)
         binary_matrix_free(self.unlockers)
         bitset_free(self.ignored_vertices)
         bitset_free(self.canonical_vertices)
@@ -294,6 +353,7 @@ cdef int _branch_and_bound(
     number of parts of the best solution found, which is stored in
     `ctx.best_order` and `ctx.best_partition`, or -1 if none was found.
     """
+    ctx.nodes += 1
     cdef bitset_t new_suffix = ctx.new_suffixes.rows[level]
     bitset_copy(new_suffix, suffix_vertices)
 
@@ -336,7 +396,7 @@ cdef int _branch_and_bound(
         part = parts_used - 1
         lower_bound = max(lower_bound, parts_used)
 
-        if _add_vertex_to_prefix_greedily_on_part(ctx, part, new_suffix, level):
+        if ctx.optimizations & _GREEDY_NEW_PART and _add_vertex_to_prefix_greedily_on_part(ctx, part, new_suffix, level):
             new_part_solution = _branch_and_bound(
                 ctx,
                 new_suffix,
@@ -462,7 +522,18 @@ cdef inline int _branch_adding_to_existing_part(
             bitset_add(my_vertices_not_added, vertex)
         vertex = bitset_next(suffix_vertices, vertex + 1)
 
-    _ignore_unlocked_vertices(ctx, level, suffix_vertices, my_vertices_not_added)
+    # Without NEW_PART_ONLY_IF_NEEDED, the vertices that can be added to an existing
+    # part also start a new one. They are kept apart, as NEW_PART_DOMINANCE only
+    # compares the ones that can't.
+    cdef bitset_t other_candidates = ctx.other_new_part_candidates.rows[level]
+    if ctx.optimizations & _NEW_PART_ONLY_IF_NEEDED:
+        bitset_clear(other_candidates)
+    else:
+        bitset_difference(other_candidates, suffix_vertices, my_vertices_not_added)
+
+    if ctx.optimizations & _UNLOCKING:
+        _ignore_unlocked_vertices(ctx, level, suffix_vertices, my_vertices_not_added)
+        bitset_difference(other_candidates, other_candidates, ctx.ignored_vertices)
 
     vertex = bitset_next(suffix_vertices, 0)
     while vertex != -1:
@@ -471,13 +542,13 @@ cdef inline int _branch_adding_to_existing_part(
         parts_for_vertex = ctx.parts_for_vertices[level].rows[vertex]
         part = bitset_next(parts_for_vertex, 0)
         while part != -1:
-            if not _can_other_vertex_be_prepended_freely(
+            if not (ctx.optimizations & _VERTEX_DOMINANCE and _can_other_vertex_be_prepended_freely(
                 ctx,
                 vertex,
                 part,
                 level,
                 suffix_vertices,
-            ) and _update_best_solution(
+            )) and _update_best_solution(
                 _branch_with_vertex_on_part(
                     ctx,
                     vertex,
@@ -531,6 +602,9 @@ cdef inline void _get_available_parts_for_vertex(
                 bitset_difference(ctx.unlocked_vertices, vertex_neighbors, part_neighbors[part])
                 unlocked_vertex = bitset_first(ctx.unlocked_vertices)
                 bitset_add(ctx.unlockers.rows[unlocked_vertex], vertex)
+
+    if not ctx.optimizations & _PART_DOMINANCE:
+        return
 
     for part in range(parts_used):
         if bitset_in(parts_for_vertex, part):
@@ -604,17 +678,17 @@ cdef inline int _branch_adding_to_new_part(
     cdef int part = parts_used - 1
     # Vertices discarded by _can_other_vertex_open_new_part_freely are removed from here.
     cdef bitset_t candidates = ctx.vertices_not_added.rows[level]
+    cdef bitset_t other_candidates = ctx.other_new_part_candidates.rows[level]
     if level == 0:
         bitset_copy(candidates, ctx.canonical_vertices)
-    cdef int vertex = bitset_next(candidates, 0)
+    cdef long vertex = _next_in_union(candidates, other_candidates, 0)
     while vertex != -1:
         bitset_discard(suffix_vertices, vertex)
 
-        if not _can_other_vertex_open_new_part_freely(
-            ctx,
-            vertex,
-            level,
-            candidates,
+        if not (
+            bitset_in(candidates, vertex)
+            and ctx.optimizations & _NEW_PART_DOMINANCE
+            and _can_other_vertex_open_new_part_freely(ctx, vertex, level, candidates)
         ) and _update_best_solution(
             _branch_with_vertex_on_part(
                 ctx,
@@ -633,9 +707,20 @@ cdef inline int _branch_adding_to_new_part(
             return best_solution_found
 
         bitset_add(suffix_vertices, vertex)
-        vertex = bitset_next(candidates, vertex + 1)
+        vertex = _next_in_union(candidates, other_candidates, vertex + 1)
 
     return best_solution_found
+
+
+cdef inline long _next_in_union(bitset_t first, bitset_t second, long start) noexcept:
+    """The smallest element of either set that is at least `start`, or -1."""
+    cdef long first_next = bitset_next(first, start)
+    cdef long second_next = bitset_next(second, start)
+    if first_next == -1:
+        return second_next
+    if second_next == -1:
+        return first_next
+    return min(first_next, second_next)
 
 
 cdef inline bint _can_other_vertex_open_new_part_freely(
@@ -712,6 +797,8 @@ cdef inline int _increment_prefix_greedily_on_existing_parts(
     vertices leave the suffix. Returns the new length of the prefix.
     """
     _compute_suffix_neighbors(ctx, suffix_vertices, level, parts_used)
+    if not ctx.optimizations & _GREEDY_EXISTING_PART:
+        return level
     cdef bitset_t* vertex_neighbors = ctx.vertex_suffix_neighbors[level].rows
     cdef bitset_t* part_neighbors = ctx.part_suffix_neighbors[level].rows
     cdef int new_level = level
@@ -788,7 +875,7 @@ cdef inline bint _check_state_seen(
     Parts are compared by their suffix neighbors, which are all that matters for
     the rest of the search, and regardless of their order.
     """
-    if level > ctx.max_prefix_length:
+    if level > ctx.max_prefix_length or not ctx.optimizations & _SEEN_STATES:
         return False
     return ctx.seen_states.contains_or_add(
         suffix_vertices,

@@ -9,9 +9,17 @@ from sage.graphs.graph import Graph
 from cysignals.memory cimport sig_calloc, sig_free
 from cysignals.signals cimport sig_on, sig_off
 
+from proper_thinness.optimizations import ALL_OPTIMIZATIONS, Optimization
 from thinness.seen_states cimport SeenStates
 
 MAX_VERTICES = 64
+
+cdef int _ALL_OPTIMIZATIONS = ALL_OPTIMIZATIONS
+cdef int _SYMMETRY = Optimization.SYMMETRY
+cdef int _SEEN_STATES = Optimization.SEEN_STATES
+cdef int _GREEDY_EXISTING_PART = Optimization.GREEDY_EXISTING_PART
+cdef int _GREEDY_NEW_PART = Optimization.GREEDY_NEW_PART
+cdef int _PART_DOMINANCE = Optimization.PART_DOMINANCE
 
 
 cdef extern from *:
@@ -25,20 +33,25 @@ def search(
     int upper_bound,
     int max_prefix_length,
     int max_seen_entries,
-) -> tuple[int, list[int], list[int]]:
+    int optimizations=ALL_OPTIMIZATIONS,
+) -> tuple[int, list[int], list[int], int]:
     """Search for a solution with at most `upper_bound` parts, stopping at one with at most `lower_bound`.
 
     The vertices of `graph` must be 0, ..., n-1, with n at most 64. Returns the
-    number of parts of the best solution found, or -1 if none was found, and the
-    order and the part of each vertex of that solution.
+    number of parts of the best solution found, or -1 if none was found, the
+    order and the part of each vertex of that solution, and the number of nodes
+    searched. `optimizations` is a combination of `Optimization` flags.
     """
-    cdef _Context ctx = _Context(graph.order(), upper_bound, max_prefix_length, max_seen_entries)
+    cdef _Context ctx = _Context(graph.order(), upper_bound, max_prefix_length, max_seen_entries, optimizations)
     for u, v in graph.edge_iterator(labels=False):
         ctx.graph[u] |= _bit(v)
         ctx.graph[v] |= _bit(u)
     cdef list orbit
-    for orbit in graph.automorphism_group(orbits=True, return_group=False):
-        ctx.canonical_vertices |= _bit(orbit[0])
+    if optimizations & _SYMMETRY:
+        for orbit in graph.automorphism_group(orbits=True, return_group=False):
+            ctx.canonical_vertices |= _bit(orbit[0])
+    else:
+        ctx.canonical_vertices = ctx.all_vertices
 
     cdef int solution = _search(ctx, lower_bound, upper_bound)
 
@@ -46,6 +59,7 @@ def search(
         solution,
         [ctx.best_order[i] for i in range(ctx.n)],
         [ctx.best_partition[i] for i in range(ctx.n)],
+        ctx.nodes,
     )
 
 
@@ -62,9 +76,10 @@ cdef int search_words(
     """Same as `search`, for a graph given by the neighbors of each vertex.
 
     `canonical_vertices` has one vertex of each orbit of the automorphism group.
-    The order of the solution found is written to `best_order`.
+    The order of the solution found is written to `best_order`. Every
+    optimization is enabled.
     """
-    cdef _Context ctx = _Context(n, upper_bound, max_prefix_length, max_seen_entries)
+    cdef _Context ctx = _Context(n, upper_bound, max_prefix_length, max_seen_entries, _ALL_OPTIMIZATIONS)
     memcpy(ctx.graph, graph, n * sizeof(uint64_t))
     ctx.canonical_vertices = canonical_vertices
     cdef int solution = _search(ctx, lower_bound, upper_bound)
@@ -112,6 +127,8 @@ cdef class _Context:
     cdef int* best_order
     cdef int* best_partition
     cdef int max_prefix_length
+    cdef int optimizations
+    cdef long long nodes
 
     def __cinit__(
         self,
@@ -119,6 +136,7 @@ cdef class _Context:
         int max_parts,
         int max_prefix_length,
         int max_seen_entries,
+        int optimizations,
     ):
         """The graph and the canonical vertices are filled in afterwards."""
         if n > MAX_VERTICES or max_parts > MAX_VERTICES:
@@ -153,6 +171,8 @@ cdef class _Context:
         self.seen_states = SeenStates(1, max_parts, max_seen_entries, sets_per_part=2)
         self.canonical_vertices = 0
         self.max_prefix_length = max_prefix_length
+        self.optimizations = optimizations
+        self.nodes = 0
 
     def __dealloc__(self):
         sig_free(self.graph)
@@ -212,6 +232,7 @@ cdef int _branch_and_bound(
     number of parts of the best solution found, which is stored in
     `ctx.best_order` and `ctx.best_partition`, or -1 if none was found.
     """
+    ctx.nodes += 1
     if suffix_vertices == 0 and parts_used <= upper_bound:
         _store_best_solution(ctx)
         return parts_used
@@ -259,7 +280,11 @@ cdef int _branch_and_bound(
         part = parts_used - 1
         lower_bound = max(lower_bound, parts_used)
 
-        vertex = _find_free_vertex_for_new_part(ctx, part, suffix_vertices, entry_level)
+        vertex = (
+            _find_free_vertex_for_new_part(ctx, part, suffix_vertices, entry_level)
+            if ctx.optimizations & _GREEDY_NEW_PART
+            else -1
+        )
         if vertex != -1:
             ctx.prefix[level] = vertex
             ctx.part_of[vertex] = part
@@ -385,6 +410,8 @@ cdef inline uint64_t _get_available_parts_for_vertex(
         if _is_subset_ignoring(part_neighbors[part], vertex_neighbors, vertex):
             parts_for_vertex |= _bit(part)
     parts_for_vertex &= ~ctx.forbidden_parts_for_vertices[vertex]
+    if not ctx.optimizations & _PART_DOMINANCE:
+        return parts_for_vertex
 
     cdef bint newly_forbidden_vertices_computed = False
     cdef uint64_t newly_forbidden_vertices = 0
@@ -540,6 +567,8 @@ cdef inline int _increment_prefix_greedily_on_existing_parts(
     the prefix.
     """
     _compute_suffix_neighbors(ctx, suffix_vertices[0], level, parts_used)
+    if not ctx.optimizations & _GREEDY_EXISTING_PART:
+        return level
     cdef uint64_t* vertex_neighbors = ctx.vertex_suffix_neighbors + level * ctx.n
     cdef uint64_t* part_neighbors = ctx.part_suffix_neighbors + level * ctx.max_parts
     cdef int new_level = level
@@ -724,7 +753,7 @@ cdef inline bint _check_state_seen(
     neighbors and the suffix vertices that can't be added to it. Parts are
     compared by those, regardless of their order.
     """
-    if level > ctx.max_prefix_length:
+    if level > ctx.max_prefix_length or not ctx.optimizations & _SEEN_STATES:
         return False
     cdef int part
     for part in range(parts_used):

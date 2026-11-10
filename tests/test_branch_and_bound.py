@@ -8,6 +8,7 @@ from sage.misc.randstate import set_random_seed
 
 from thinness import branch_and_bound
 from thinness.branch_and_bound import calculate_thinness
+from thinness.optimizations import ALL_OPTIMIZATIONS, Optimization
 from thinness.z3 import Z3ThinnessSolver
 from thinness.verify import verify_solution
 from thinness.shower import show_graph, show_solution
@@ -17,6 +18,12 @@ class TestBranchAndBound(unittest.TestCase):
         actual_thinness = calculate_thinness(graph)
         self.assertEqual(actual_thinness, expected_thinness)
         solution = calculate_thinness(graph, certificate=True)
+        self.assertEqual(solution.thinness, expected_thinness)
+        self.assertTrue(verify_solution(graph, solution))
+
+    def _assert_thinness_with_optimizations(self, graph: Graph, expected_thinness: int, optimizations: Optimization):
+        self.assertEqual(calculate_thinness(graph, optimizations=optimizations), expected_thinness)
+        solution = calculate_thinness(graph, certificate=True, optimizations=optimizations)
         self.assertEqual(solution.thinness, expected_thinness)
         self.assertTrue(verify_solution(graph, solution))
 
@@ -108,6 +115,36 @@ class TestBranchAndBound(unittest.TestCase):
                         with self.subTest(graph=graph.graph6_string()):
                             self._assert_thinness_of_graph(graph, thinness)
 
+    def test_thinness_without_each_optimization(self):
+        set_random_seed(0)
+        for graph in _graphs_for_optimizations(orders=[8, 10], graphs_per_case=3):
+            thinness = reference_thinness(graph)
+            for optimization in Optimization:
+                with self.subTest(graph=graph.graph6_string(), without=optimization.name):
+                    self._assert_thinness_with_optimizations(graph, thinness, ALL_OPTIMIZATIONS & ~optimization)
+
+    def test_statistics_count_the_nodes_searched(self):
+        statistics = {}
+        calculate_thinness(crown_graph(4), statistics=statistics)
+        self.assertGreater(statistics['nodes'], 0)
+
+    def test_thinness_without_optimizations(self):
+        set_random_seed(0)
+        for graph in _graphs_for_optimizations(orders=[6, 7], graphs_per_case=3):
+            thinness = reference_thinness(graph)
+            with self.subTest(graph=graph.graph6_string()):
+                self._assert_thinness_with_optimizations(graph, thinness, Optimization(0))
+
+    def test_thinness_without_each_optimization_with_bitsets(self):
+        # Graphs this small are searched with 64-bit words, so force the search with bitsets.
+        set_random_seed(0)
+        with unittest.mock.patch.object(branch_and_bound, 'MAX_VERTICES_FOR_WORDS', 0):
+            for graph in _graphs_for_optimizations(orders=[8], graphs_per_case=2):
+                thinness = reference_thinness(graph)
+                for optimizations in [ALL_OPTIMIZATIONS & ~optimization for optimization in Optimization] + [Optimization(0)]:
+                    with self.subTest(graph=graph.graph6_string(), optimizations=optimizations):
+                        self._assert_thinness_with_optimizations(graph, thinness, optimizations)
+
     def test_thinness_of_graph_with_more_than_64_vertices(self):
         self._assert_thinness_of_graph(graphs.CycleGraph(70), 2)
 
@@ -123,6 +160,18 @@ class TestBranchAndBound(unittest.TestCase):
         self.assertTrue(first.is_subgraph(second, induced=True, up_to_isomorphism=True))
         self.assertGreaterEqual(calculate_thinness(second), calculate_thinness(first))
         self._assert_thinness_of_graph(first, 3)
+
+
+def _graphs_for_optimizations(orders: list[int], graphs_per_case: int) -> list[Graph]:
+    """Random graphs of each order and density, and a disconnected one for `Optimization.COMPONENTS`."""
+    random_graphs = [
+        graphs.RandomGNP(n, density)
+        for n in orders
+        for density in [0.3, 0.5, 0.8]
+        for _ in range(graphs_per_case)
+    ]
+    random_graphs.append(graphs.RandomGNP(orders[0] - 2, 0.5) + crown_graph(3))
+    return random_graphs
 
 
 def crown_graph(vertices_per_side: int) -> Graph:

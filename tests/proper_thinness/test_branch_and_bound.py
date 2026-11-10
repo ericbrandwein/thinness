@@ -8,6 +8,7 @@ from sage.misc.randstate import set_random_seed
 
 from proper_thinness import branch_and_bound
 from proper_thinness.branch_and_bound import calculate_proper_thinness
+from proper_thinness.optimizations import ALL_OPTIMIZATIONS, Optimization
 from thinness.z3 import Z3ProperThinnessSolver
 from proper_thinness.verify import verify_solution
 
@@ -21,6 +22,17 @@ class TestBranchAndBound(unittest.TestCase):
             print("Graph:", graph.graph6_string())
             print("Solution order:", solution.order)
             print("Solution partition:", solution.partition)
+        self.assertTrue(verify_solution(graph, solution))
+
+    def _assert_proper_thinness_with_optimizations(
+        self,
+        graph: Graph,
+        expected_proper_thinness: int,
+        optimizations: Optimization,
+    ):
+        self.assertEqual(calculate_proper_thinness(graph, optimizations=optimizations), expected_proper_thinness)
+        solution = calculate_proper_thinness(graph, certificate=True, optimizations=optimizations)
+        self.assertEqual(solution.thinness, expected_proper_thinness)
         self.assertTrue(verify_solution(graph, solution))
 
     def test_proper_thinness_of_K1(self):
@@ -102,6 +114,52 @@ class TestBranchAndBound(unittest.TestCase):
                         proper_thinness = reference_proper_thinness(graph)
                         with self.subTest(graph=graph.graph6_string()):
                             self._assert_proper_thinness_of_graph(graph, proper_thinness)
+
+    def test_proper_thinness_without_each_optimization(self):
+        set_random_seed(0)
+        for graph in _graphs_for_optimizations(orders=[8, 10], graphs_per_case=3):
+            proper_thinness = reference_proper_thinness(graph)
+            for optimization in Optimization:
+                with self.subTest(graph=graph.graph6_string(), without=optimization.name):
+                    self._assert_proper_thinness_with_optimizations(
+                        graph,
+                        proper_thinness,
+                        ALL_OPTIMIZATIONS & ~optimization,
+                    )
+
+    def test_statistics_count_the_nodes_searched(self):
+        statistics = {}
+        calculate_proper_thinness(graphs.CycleGraph(6), statistics=statistics)
+        self.assertGreater(statistics['nodes'], 0)
+
+    def test_proper_thinness_without_optimizations(self):
+        set_random_seed(0)
+        for graph in _graphs_for_optimizations(orders=[6, 7], graphs_per_case=3):
+            proper_thinness = reference_proper_thinness(graph)
+            with self.subTest(graph=graph.graph6_string()):
+                self._assert_proper_thinness_with_optimizations(graph, proper_thinness, Optimization(0))
+
+    def test_proper_thinness_without_each_optimization_with_bitsets(self):
+        # Graphs this small are searched with 64-bit words, so force the search with bitsets.
+        set_random_seed(0)
+        with unittest.mock.patch.object(branch_and_bound, 'MAX_VERTICES_FOR_WORDS', 0):
+            for graph in _graphs_for_optimizations(orders=[8], graphs_per_case=2):
+                proper_thinness = reference_proper_thinness(graph)
+                for optimizations in [ALL_OPTIMIZATIONS & ~optimization for optimization in Optimization] + [Optimization(0)]:
+                    with self.subTest(graph=graph.graph6_string(), optimizations=optimizations):
+                        self._assert_proper_thinness_with_optimizations(graph, proper_thinness, optimizations)
+
+
+def _graphs_for_optimizations(orders: list[int], graphs_per_case: int) -> list[Graph]:
+    """Random graphs of each order and density, and a disconnected one for `Optimization.COMPONENTS`."""
+    random_graphs = [
+        graphs.RandomGNP(n, density)
+        for n in orders
+        for density in [0.3, 0.5, 0.8]
+        for _ in range(graphs_per_case)
+    ]
+    random_graphs.append(graphs.RandomGNP(orders[0] - 2, 0.5) + graphs.CycleGraph(6))
+    return random_graphs
 
 
 def reference_proper_thinness(graph: Graph) -> int:
