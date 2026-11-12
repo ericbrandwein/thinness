@@ -13,7 +13,8 @@ from proper_thinness import branch_and_bound_64
 from proper_thinness.heuristic import heuristic_solution
 from proper_thinness.optimizations import ALL_OPTIMIZATIONS, Optimization
 
-DEFAULT_MAX_PREFIX_LENGTH = 15
+# Seen states are recorded for prefixes of at most this length, None for every length.
+DEFAULT_MAX_PREFIX_LENGTH = None
 DEFAULT_MAX_SEEN_ENTRIES = 1_000_000
 # Graphs with at most this many vertices are searched with 64-bit words instead of bitsets.
 MAX_VERTICES_FOR_WORDS = branch_and_bound_64.MAX_VERTICES
@@ -30,7 +31,7 @@ def calculate_proper_thinness(
     lower_bound: int = 1,
     upper_bound: int = None,
     certificate: bool = False,
-    max_prefix_length: int = DEFAULT_MAX_PREFIX_LENGTH,
+    max_prefix_length: int | None = DEFAULT_MAX_PREFIX_LENGTH,
     max_seen_entries: int = DEFAULT_MAX_SEEN_ENTRIES,
     optimizations: Optimization = ALL_OPTIMIZATIONS,
     statistics: dict | None = None,
@@ -103,7 +104,7 @@ def calculate_proper_thinness_of_connected_graph(
     lower_bound: int = 1,
     upper_bound: int = None,
     certificate: bool = False,
-    max_prefix_length: int = DEFAULT_MAX_PREFIX_LENGTH,
+    max_prefix_length: int | None = DEFAULT_MAX_PREFIX_LENGTH,
     max_seen_entries: int = DEFAULT_MAX_SEEN_ENTRIES,
     optimizations: Optimization = ALL_OPTIMIZATIONS,
     statistics: dict | None = None,
@@ -136,6 +137,8 @@ def calculate_proper_thinness_of_connected_graph(
         return heuristic if certificate else heuristic.thinness
     upper_bound = heuristic.thinness if upper_bound is None else min(upper_bound, heuristic.thinness)
 
+    if max_prefix_length is None:
+        max_prefix_length = graph.order()
     search = (
         branch_and_bound_64.search
         if graph.order() <= MAX_VERTICES_FOR_WORDS

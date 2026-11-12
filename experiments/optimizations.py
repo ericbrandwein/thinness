@@ -4,8 +4,9 @@
         [--time-limit SECONDS] [--max-seen-entries N] [--output FILE]
     python -m experiments.optimizations --summary [--output FILE]
 
-Each graph is solved with every optimization, without each one of them, and
-without any of them, and each run is written as a row of the output CSV file. A
+Each graph is solved with the default optimizations, without each one of them,
+with each one that isn't a default, and without any optimization, and each run
+is written as a row of the output CSV file. A
 run that takes longer than the time limit is stopped. The graphs of each series
 grow in size, and once a configuration times out on a series, it isn't run on
 its larger graphs, which are recorded as skipped.
@@ -23,7 +24,7 @@ don't depend on the machine. For proper thinness, those searched to compute the
 thinness as a lower bound are in a separate column.
 
 At the end, and with --summary, it prints for each configuration how much slower
-it is than the one with every optimization, and how many more nodes it searches,
+it is than the one with the default optimizations, and how many more nodes it searches,
 as the geometric mean of the ratios over the graphs both solved, and on how many
 graphs it timed out. Graphs that both solve in less than 10 milliseconds are
 left out of the times, as those are mostly overhead.
@@ -55,7 +56,7 @@ PROPER_THINNESS = 'proper-thinness'
 SOLVERS = {THINNESS: calculate_thinness, PROPER_THINNESS: calculate_proper_thinness}
 OPTIMIZATIONS = {THINNESS: thinness_optimizations, PROPER_THINNESS: proper_thinness_optimizations}
 
-ALL = 'all'
+DEFAULT = 'default'
 NONE = 'none'
 OK = 'ok'
 TIMEOUT = 'timeout'
@@ -109,33 +110,33 @@ FAMILIES = {
     ),
     'random-3-regular': Family(
         series=[3],
-        sizes={THINNESS: [12, 16, 20, 24, 28], PROPER_THINNESS: [10, 12, 14, 16]},
+        sizes={THINNESS: [20, 24, 28, 32, 36, 40], PROPER_THINNESS: [12, 16, 20, 24]},
         graphs_per_size=3,
         generate=lambda degree, n: graphs.RandomRegular(degree, n),
     ),
     'tree': Family(
         series=[None],
-        sizes={THINNESS: [20, 30, 40, 50, 60], PROPER_THINNESS: [15, 20, 25, 30, 35]},
+        sizes={THINNESS: [50, 75, 100, 150, 200], PROPER_THINNESS: [20, 25, 30, 35, 40]},
         graphs_per_size=3,
         generate=lambda _, n: graphs.RandomTree(n),
     ),
     'cograph': Family(
         series=[None],
-        sizes={THINNESS: [12, 16, 20, 24, 28], PROPER_THINNESS: [10, 12, 14, 16, 18]},
+        sizes={THINNESS: [24, 32, 40, 48, 56, 64], PROPER_THINNESS: [14, 18, 22, 26, 30]},
         graphs_per_size=3,
         generate=lambda _, n: random_cograph(n),
     ),
     # Thinness and proper thinness k with 2k vertices.
     'complement-of-kK2': Family(
         series=[None],
-        sizes={THINNESS: [4, 6, 8, 10, 12, 14], PROPER_THINNESS: [4, 6, 8, 10, 12]},
+        sizes={THINNESS: [4, 6, 8, 10, 12, 14], PROPER_THINNESS: [4, 6, 8, 10, 12, 14]},
         graphs_per_size=1,
         generate=lambda _, k: (graphs.CompleteGraph(2) * k).complement(),
     ),
     # Thinness k - 1 with 2k vertices.
     'crown': Family(
         series=[None],
-        sizes={THINNESS: [6, 7, 8, 9, 10, 11, 12, 13], PROPER_THINNESS: [3, 4, 5, 6, 7, 8]},
+        sizes={THINNESS: [6, 7, 8, 9, 10, 11, 12, 13], PROPER_THINNESS: [3, 4, 5, 6, 7, 8, 9, 10]},
         graphs_per_size=1,
         generate=lambda _, k: crown_graph(k),
     ),
@@ -165,7 +166,7 @@ class Case:
     graph: Graph
 
     def key(self) -> tuple[str, str, str, str]:
-        return self.family, str(self.series), str(self.size), str(self.index)
+        return self.family, _series_key(self.series), str(self.size), str(self.index)
 
 
 def generate_cases(problem: str, families: list[str]) -> Iterator[Case]:
@@ -181,12 +182,15 @@ def generate_cases(problem: str, families: list[str]) -> Iterator[Case]:
 
 
 def configurations(problem: str) -> list[tuple[str, int]]:
-    """Every optimization, without each one of them, and without any of them."""
+    """The default optimizations, without each one of them, with each other one, and without any of them."""
     optimizations = OPTIMIZATIONS[problem]
+    default = optimizations.DEFAULT_OPTIMIZATIONS
     return (
-        [(ALL, optimizations.ALL_OPTIMIZATIONS)]
+        [(DEFAULT, default)]
         + [
-            (f'without {optimization.name}', optimizations.ALL_OPTIMIZATIONS & ~optimization)
+            (f'without {optimization.name}', default & ~optimization)
+            if default & optimization
+            else (f'with {optimization.name}', default | optimization)
             for optimization in optimizations.Optimization
         ]
         + [(NONE, optimizations.Optimization(0))]
@@ -265,7 +269,7 @@ def run(problems: list[str], families: list[str], time_limit: float, max_seen_en
                 for name, optimizations in configurations(problem):
                     if (problem, *case.key(), name) in done:
                         continue
-                    series_key = (problem, case.family, str(case.series), name)
+                    series_key = (problem, case.family, _series_key(case.series), name)
                     if case.size > timed_out_at.get(series_key, math.inf):
                         result = {'status': SKIPPED}
                     else:
@@ -300,7 +304,7 @@ def run(problems: list[str], families: list[str], time_limit: float, max_seen_en
 
 
 def summarize(output: str):
-    """For each configuration and family, the slowdown and the extra nodes with respect to every optimization, and the timeouts."""
+    """For each configuration and family, the slowdown and the extra nodes with respect to the default optimizations, and the timeouts."""
     rows = _read_rows(output)
     by_graph = collections.defaultdict(dict)
     for row in rows:
@@ -314,9 +318,9 @@ def summarize(output: str):
         print(f'\n{problem}: {len(graph_keys)} graphs, {len(mismatches)} with different values')
         for key in mismatches:
             print(f'  different values: {key}')
-        print(f'\nTime, relative to every optimization, over the graphs that take at least {MIN_SECONDS_FOR_RATIOS}s:')
+        print(f'\nTime, relative to the default optimizations, over the graphs that take at least {MIN_SECONDS_FOR_RATIOS}s:')
         _print_ratios(problem, by_graph, graph_keys, _seconds, minimum=MIN_SECONDS_FOR_RATIOS)
-        print('\nNodes, relative to every optimization:')
+        print('\nNodes, relative to the default optimizations:')
         _print_ratios(problem, by_graph, graph_keys, _nodes, minimum=0)
 
 
@@ -330,7 +334,7 @@ def _print_ratios(
     """A table with a row for each configuration and a column for each family.
 
     Each cell is the geometric mean of the ratios between the measure of the
-    configuration and that of every optimization, over the graphs both solved
+    configuration and that of the default optimizations, over the graphs both solved
     where at least one of them measures `minimum` or more, and the number of
     graphs the configuration didn't solve.
     """
@@ -344,19 +348,19 @@ def _print_ratios(
             for key in graph_keys:
                 if family is not None and key[1] != family:
                     continue
-                row, all_row = by_graph[key].get(name), by_graph[key].get(ALL)
+                row, default_row = by_graph[key].get(name), by_graph[key].get(DEFAULT)
                 if row is None:
                     continue
                 if row['status'] != OK:
                     not_solved += 1
                 elif (
-                    all_row is not None
-                    and all_row['status'] == OK
-                    and max(measure(row), measure(all_row)) >= minimum
+                    default_row is not None
+                    and default_row['status'] == OK
+                    and max(measure(row), measure(default_row)) >= minimum
                 ):
-                    ratios.append(measure(row) / measure(all_row))
-            mean = math.exp(sum(map(math.log, ratios)) / len(ratios)) if ratios else math.nan
-            cells.append(f'{mean:.2f}x' + (f' ({not_solved} TO)' if not_solved else ''))
+                    ratios.append(measure(row) / measure(default_row))
+            mean = f'{math.exp(sum(map(math.log, ratios)) / len(ratios)):.2f}x' if ratios else '-'
+            cells.append(mean + (f' ({not_solved} TO)' if not_solved else ''))
         print('\t'.join([name, *cells]))
 
 
@@ -374,6 +378,11 @@ def _read_rows(output: str) -> list[dict]:
         return []
     with open(output, newline='') as file:
         return list(csv.DictReader(file))
+
+
+def _series_key(series) -> str:
+    """The series as it is written in the output file, where None is empty."""
+    return '' if series is None else str(series)
 
 
 def _run_key(row: dict) -> tuple[str, ...]:

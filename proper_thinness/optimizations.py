@@ -30,3 +30,4 @@ class Optimization(enum.IntFlag):
 
 
 ALL_OPTIMIZATIONS = functools.reduce(operator.or_, Optimization)
+DEFAULT_OPTIMIZATIONS = ALL_OPTIMIZATIONS

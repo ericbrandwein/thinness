@@ -9,12 +9,12 @@ from sage.graphs.graph import Graph
 from cysignals.memory cimport sig_malloc, sig_calloc, sig_free
 from cysignals.signals cimport sig_on, sig_off
 
-from thinness.optimizations import ALL_OPTIMIZATIONS, Optimization
+from thinness.optimizations import DEFAULT_OPTIMIZATIONS, Optimization
 from thinness.seen_states cimport SeenStates
 
 MAX_VERTICES = 64
 
-cdef int _ALL_OPTIMIZATIONS = ALL_OPTIMIZATIONS
+cdef int _DEFAULT_OPTIMIZATIONS = DEFAULT_OPTIMIZATIONS
 cdef int _SYMMETRY = Optimization.SYMMETRY
 cdef int _SEEN_STATES = Optimization.SEEN_STATES
 cdef int _GREEDY_EXISTING_PART = Optimization.GREEDY_EXISTING_PART
@@ -36,7 +36,7 @@ def search(
     int upper_bound,
     int max_prefix_length,
     int max_seen_entries,
-    int optimizations=ALL_OPTIMIZATIONS,
+    int optimizations=DEFAULT_OPTIMIZATIONS,
 ) -> tuple[int, list[int], list[int], int]:
     """Search for a solution with at most `upper_bound` parts, stopping at one with at most `lower_bound`.
 
@@ -80,7 +80,7 @@ cdef int search_words(
     `canonical_vertices` has one vertex of each orbit of the automorphism group.
     Every optimization is enabled.
     """
-    cdef _Context ctx = _Context(n, upper_bound, max_prefix_length, max_seen_entries, _ALL_OPTIMIZATIONS)
+    cdef _Context ctx = _Context(n, upper_bound, max_prefix_length, max_seen_entries, _DEFAULT_OPTIMIZATIONS)
     memcpy(ctx.graph, graph, n * sizeof(uint64_t))
     ctx.canonical_vertices = canonical_vertices
     return _search(ctx, lower_bound, upper_bound)

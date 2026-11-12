@@ -38,3 +38,5 @@ class Optimization(enum.IntFlag):
 
 
 ALL_OPTIMIZATIONS = functools.reduce(operator.or_, Optimization)
+# PART_DOMINANCE barely reduces the nodes searched, and costs more time than it saves.
+DEFAULT_OPTIMIZATIONS = ALL_OPTIMIZATIONS & ~Optimization.PART_DOMINANCE

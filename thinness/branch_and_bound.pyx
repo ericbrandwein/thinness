@@ -9,11 +9,12 @@ from sage.graphs.graph_decompositions.vertex_separation import vertex_separation
 
 from thinness import branch_and_bound_64
 from thinness.consistent_solution import ConsistentSolution
-from thinness.optimizations import ALL_OPTIMIZATIONS, Optimization
+from thinness.optimizations import DEFAULT_OPTIMIZATIONS, Optimization
 from thinness.seen_states cimport SeenStates
 from thinness.vertex_separation import solution_from_vertex_separation
 
-DEFAULT_MAX_PREFIX_LENGTH = 15
+# Seen states are recorded for prefixes of at most this length, None for every length.
+DEFAULT_MAX_PREFIX_LENGTH = None
 DEFAULT_MAX_SEEN_ENTRIES = 1_000_000
 # Graphs with at most this many vertices are searched with 64-bit words instead of bitsets.
 MAX_VERTICES_FOR_WORDS = branch_and_bound_64.MAX_VERTICES
@@ -33,12 +34,12 @@ def calculate_thinness(
     lower_bound: int = 1,
     upper_bound: int = None,
     certificate: bool = False,
-    max_prefix_length: int = DEFAULT_MAX_PREFIX_LENGTH,
+    max_prefix_length: int | None = DEFAULT_MAX_PREFIX_LENGTH,
     max_seen_entries: int = DEFAULT_MAX_SEEN_ENTRIES,
-    optimizations: Optimization = ALL_OPTIMIZATIONS,
+    optimizations: Optimization = DEFAULT_OPTIMIZATIONS,
     statistics: dict | None = None,
 ) -> ConsistentSolution | int:
-    """`optimizations` is the combination of `Optimization` flags to use, all of them by default.
+    """`optimizations` is the combination of `Optimization` flags to use, `DEFAULT_OPTIMIZATIONS` by default.
 
     If `statistics` is given, its `'nodes'` is set to the number of nodes the
     branch and bound searched.
@@ -111,9 +112,9 @@ def calculate_thinness_of_connected_graph(
     lower_bound: int = 1,
     upper_bound: int = None,
     certificate: bool = False,
-    max_prefix_length: int = DEFAULT_MAX_PREFIX_LENGTH,
+    max_prefix_length: int | None = DEFAULT_MAX_PREFIX_LENGTH,
     max_seen_entries: int = DEFAULT_MAX_SEEN_ENTRIES,
-    optimizations: Optimization = ALL_OPTIMIZATIONS,
+    optimizations: Optimization = DEFAULT_OPTIMIZATIONS,
     statistics: dict | None = None,
 ) -> ConsistentSolution | int:
     """upper_bound is exclusive.
@@ -139,6 +140,8 @@ def calculate_thinness_of_connected_graph(
         else min(upper_bound, initial_upper_bound)
     )
 
+    if max_prefix_length is None:
+        max_prefix_length = graph.order()
     search = (
         branch_and_bound_64.search
         if graph.order() <= MAX_VERTICES_FOR_WORDS
@@ -181,7 +184,7 @@ def _search_with_bitsets(
     int upper_bound,
     int max_prefix_length,
     int max_seen_entries,
-    int optimizations=ALL_OPTIMIZATIONS,
+    int optimizations=DEFAULT_OPTIMIZATIONS,
 ) -> tuple[int, list[int], list[int], int]:
     """Same as `branch_and_bound_64.search`, for graphs of any size."""
     cdef _Context ctx = _Context(graph, upper_bound, max_prefix_length, max_seen_entries, optimizations)
